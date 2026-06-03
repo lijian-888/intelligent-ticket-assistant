@@ -50,6 +50,9 @@ function renderTickets() {
       const fallbackActionText = result?.status === "建议退单" ? "已退单" : result?.status === "待补充" ? "已加入补充任务" : "已流转";
       const actionText = actionDone && typeof executedActionLabel === "function" ? executedActionLabel(result) : actionDone ? fallbackActionText : (loading ? "流转中" : "智能流转");
       const actionClass = actionDone && typeof executedButtonClass === "function" ? executedButtonClass(result) : actionDone ? "secondary" : "primary";
+      const rerunButton = actionDone
+        ? `<button class="btn secondary rerun-btn" data-ticket-no="${escapeHtml(ticket.ticket_no)}" ${loading ? "disabled" : ""}>重新流转</button>`
+        : "";
       return `
         <tr data-ticket-no="${escapeHtml(ticket.ticket_no)}">
           <td class="red-text">${index + 1}</td>
@@ -69,6 +72,7 @@ function renderTickets() {
             <button class="btn ${actionClass} detect-btn" data-ticket-no="${escapeHtml(ticket.ticket_no)}" ${loading || actionDone ? "disabled" : ""}>
               ${escapeHtml(actionText)}
             </button>
+            ${rerunButton}
           </td>
         </tr>`;
     })
@@ -99,6 +103,17 @@ async function detectTicket(ticketNo) {
   }
 }
 
+function clearCachedResult(ticketNo) {
+  state.results.delete(ticketNo);
+  saveCachedResults();
+}
+
+async function rerunTicket(ticketNo) {
+  clearCachedResult(ticketNo);
+  showToast(`工单 ${ticketNo} 正在重新智能流转。`);
+  await detectTicket(ticketNo);
+}
+
 async function processAll() {
   els.processAllBtn.disabled = true;
   try {
@@ -113,8 +128,14 @@ async function processAll() {
 
 document.addEventListener("click", (event) => {
   const detectBtn = event.target.closest(".detect-btn");
+  const rerunBtn = event.target.closest(".rerun-btn");
   const row = event.target.closest("tr[data-ticket-no]");
 
+  if (rerunBtn) {
+    event.stopPropagation();
+    rerunTicket(rerunBtn.dataset.ticketNo);
+    return;
+  }
   if (detectBtn) {
     event.stopPropagation();
     detectTicket(detectBtn.dataset.ticketNo);

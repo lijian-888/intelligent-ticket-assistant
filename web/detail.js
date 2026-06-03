@@ -60,8 +60,8 @@ function renderAiResult(current) {
   }
   els.aiStatus.textContent = typeof resultStatusLabel === "function" ? resultStatusLabel(current) : current.status;
   if (current.automation_mode === "auto_executed") {
-    els.detectBtn.disabled = true;
-    els.detectBtn.textContent = typeof executedActionLabel === "function" ? executedActionLabel(current) : "已执行";
+    els.detectBtn.disabled = false;
+    els.detectBtn.textContent = "重新智能流转";
   } else {
     els.detectBtn.disabled = false;
     els.detectBtn.textContent = "智能流转";
@@ -76,6 +76,10 @@ async function detectTicket() {
   els.detectBtn.disabled = true;
   els.detectBtn.textContent = "流转中";
   els.aiStatus.textContent = "流转中";
+  if (result?.automation_mode === "auto_executed") {
+    result = null;
+    saveCachedResultPlaceholder(ticketNo);
+  }
   try {
     result = await api(`/tickets/${encodeURIComponent(ticketNo)}/smart-transfer`, { method: "POST" });
     saveCachedResult(result);
@@ -88,11 +92,15 @@ async function detectTicket() {
   } catch (error) {
     showToast(`智能流转失败：${error.message}`);
   } finally {
-    if (result?.automation_mode !== "auto_executed") {
-      els.detectBtn.disabled = false;
-      els.detectBtn.textContent = "智能流转";
-    }
+    els.detectBtn.disabled = false;
+    els.detectBtn.textContent = result?.automation_mode === "auto_executed" ? "重新智能流转" : "智能流转";
   }
+}
+
+function saveCachedResultPlaceholder(ticketNoValue) {
+  const cached = JSON.parse(sessionStorage.getItem("aiResults") || "{}");
+  delete cached[ticketNoValue];
+  sessionStorage.setItem("aiResults", JSON.stringify(cached));
 }
 
 async function createSupplementTask(ticketNoValue, button) {
