@@ -2,99 +2,145 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.embedding_client import cosine_similarity, embed_texts, get_embedding_runtime_model
 from app.models import LegalReference, StructuredTicket, Ticket
 
 
 @dataclass(frozen=True)
 class LegalArticle:
-    """mock 法律知识库条目，后续可替换为数据库、全文检索或向量库。"""
+    """mock 法律知识库条目；系统启动后会转成向量索引。"""
 
+    source_id: str
     law_name: str
     article: str
     excerpt: str
-    keywords: tuple[str, ...]
+    retrieval_text: str
     reason_template: str
+
+
+@dataclass(frozen=True)
+class LegalVectorEntry:
+    """法律条款向量索引中的单条记录。"""
+
+    article: LegalArticle
+    vector: list[float]
 
 
 LEGAL_KNOWLEDGE_BASE: tuple[LegalArticle, ...] = (
     LegalArticle(
+        source_id="consumer_law_55",
         law_name="中华人民共和国消费者权益保护法",
         article="第五十五条",
         excerpt="经营者提供商品或者服务有欺诈行为的，消费者可以依法主张增加赔偿。",
-        keywords=("赔偿", "欺诈", "虚假宣传", "退款", "退货", "消费纠纷", "消费者"),
-        reason_template="工单涉及消费者权益、退款赔偿或欺诈争议。",
+        retrieval_text="消费者权益保护 欺诈 消费纠纷 退款 退货 赔偿 协调 消费者 商品 服务",
+        reason_template="向量检索显示该工单与消费者权益、退款赔偿或欺诈争议语义接近。",
     ),
     LegalArticle(
+        source_id="advertising_law_28",
         law_name="中华人民共和国广告法",
         article="第二十八条",
         excerpt="广告以虚假或者引人误解的内容欺骗、误导消费者的，构成虚假广告。",
-        keywords=("广告", "虚假宣传", "医疗功效", "夸大宣传", "误导消费者", "宣传"),
-        reason_template="工单内容涉及虚假宣传、医疗功效暗示或广告误导。",
+        retrieval_text="广告 虚假广告 虚假宣传 引人误解 误导消费者 医疗功效 夸大宣传 商品宣传",
+        reason_template="向量检索显示该工单与虚假宣传、医疗功效暗示或广告误导语义接近。",
     ),
     LegalArticle(
+        source_id="anti_unfair_competition_law_8",
         law_name="中华人民共和国反不正当竞争法",
         article="第八条",
         excerpt="经营者不得对商品性能、功能、质量、销售状况、用户评价等作虚假或者引人误解的商业宣传。",
-        keywords=("虚假宣传", "商业宣传", "误导", "质量", "功能", "功效"),
-        reason_template="工单涉及商品功能、质量或功效方面的商业宣传争议。",
+        retrieval_text="反不正当竞争 商业宣传 商品性能 商品功能 商品质量 虚假宣传 引人误解 功效 宣传",
+        reason_template="向量检索显示该工单与商品功能、质量或功效方面的商业宣传争议语义接近。",
     ),
     LegalArticle(
+        source_id="food_safety_law_148",
         law_name="中华人民共和国食品安全法",
         article="第一百四十八条",
         excerpt="消费者因不符合食品安全标准的食品受到损害的，可以依法要求赔偿；符合条件时可主张惩罚性赔偿。",
-        keywords=("食品", "过期食品", "十倍赔偿", "食品安全法", "标签", "配料表", "保质期"),
-        reason_template="工单涉及食品安全、标签、保质期或惩罚性赔偿。",
+        retrieval_text="食品安全 食品 过期食品 保质期 标签 配料表 十倍赔偿 惩罚性赔偿 不符合食品安全标准",
+        reason_template="向量检索显示该工单与食品安全、标签、保质期或惩罚性赔偿语义接近。",
     ),
     LegalArticle(
+        source_id="product_quality_law_40",
         law_name="中华人民共和国产品质量法",
         article="第四十条",
         excerpt="售出的产品不具备应当具备的使用性能、存在质量问题的，销售者应当依法承担修理、更换、退货等责任。",
-        keywords=("质量", "产品质量", "退货", "退款", "不合格", "故障", "电器"),
-        reason_template="工单涉及商品质量、退换货或产品不合格争议。",
+        retrieval_text="产品质量 商品质量 不合格 故障 使用性能 修理 更换 退货 退款 电器",
+        reason_template="向量检索显示该工单与商品质量、退换货或产品不合格争议语义接近。",
     ),
     LegalArticle(
+        source_id="medical_device_regulation",
         law_name="医疗器械监督管理条例",
         article="相关条款",
         excerpt="医疗器械注册、备案、标签说明书和宣传使用应当符合法规要求，不得作虚假或误导性表达。",
-        keywords=("医疗器械", "医疗功效", "文号", "企业执行标准", "备案", "注册"),
-        reason_template="工单涉及医疗器械属性、文号或医疗功效宣传。",
+        retrieval_text="医疗器械 医疗功效 文号 企业执行标准 备案 注册 标签说明书 宣传 误导",
+        reason_template="向量检索显示该工单与医疗器械属性、文号或医疗功效宣传语义接近。",
     ),
     LegalArticle(
+        source_id="complaint_report_measure",
         law_name="市场监督管理投诉举报处理暂行办法",
         article="第九条至第十五条",
         excerpt="市场监督管理部门依法处理投诉举报，并按职责权限、管辖范围和材料完整性进行受理或分送。",
-        keywords=("投诉", "举报", "受理", "管辖", "分送", "市场监管", "查处"),
-        reason_template="工单涉及投诉举报受理、管辖或分送办理。",
+        retrieval_text="市场监督管理 投诉 举报 受理 管辖 分送 查处 职责范围 材料完整",
+        reason_template="向量检索显示该工单与投诉举报受理、管辖或分送办理语义接近。",
     ),
     LegalArticle(
+        source_id="price_fraud_rule",
         law_name="明码标价和禁止价格欺诈规定",
         article="相关条款",
         excerpt="经营者销售商品、提供服务应当明码标价，不得实施价格欺诈。",
-        keywords=("价格", "收费", "乱收费", "明码标价", "价格欺诈"),
-        reason_template="工单涉及价格、收费或价格欺诈争议。",
+        retrieval_text="价格 收费 乱收费 明码标价 价格欺诈 服务收费 停车费 价格争议",
+        reason_template="向量检索显示该工单与价格、收费或价格欺诈争议语义接近。",
     ),
 )
 
+_VECTOR_INDEX: list[LegalVectorEntry] | None = None
+
 
 def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limit: int = 5) -> list[LegalReference]:
-    """根据工单文本检索可能涉及的法律条款，当前使用 mock 关键词检索。"""
+    """根据工单文本对法律知识库进行向量检索。"""
 
-    text = f"{ticket.title} {ticket.content} {ticket.ticket_type} {ticket.appeal_purpose} {' '.join(structured.keywords)}"
-    scored: list[LegalReference] = []
-    for article in LEGAL_KNOWLEDGE_BASE:
-        matched = [keyword for keyword in article.keywords if keyword and keyword in text]
-        if not matched:
+    query_text = (
+        f"{ticket.title}\n{ticket.content}\n{ticket.ticket_type}\n{ticket.appeal_purpose}\n"
+        f"{structured.case_nature.value}\n{structured.appeal}\n{' '.join(structured.keywords)}"
+    )
+    query_vector = embed_texts([query_text])[0]
+    scored = [
+        (entry, cosine_similarity(query_vector, entry.vector))
+        for entry in _get_vector_index()
+    ]
+    references = []
+    for entry, score in sorted(scored, key=lambda item: item[1], reverse=True)[:limit]:
+        if score <= 0:
             continue
-        score = min(1.0, 0.35 + 0.12 * len(matched))
-        scored.append(
+        references.append(
             LegalReference(
-                law_name=article.law_name,
-                article=article.article,
-                excerpt=article.excerpt,
-                matched_keywords=matched,
+                law_name=entry.article.law_name,
+                article=entry.article.article,
+                excerpt=entry.article.excerpt,
                 relevance_score=round(score, 2),
-                reason=article.reason_template,
+                reason=entry.article.reason_template,
+                retrieval_method="vector",
+                embedding_model=get_embedding_runtime_model(),
+                source_id=entry.article.source_id,
             )
         )
+    return references
 
-    return sorted(scored, key=lambda item: item.relevance_score, reverse=True)[:limit]
+
+def _get_vector_index() -> list[LegalVectorEntry]:
+    """构建并缓存 mock 法律知识库向量索引。"""
+
+    global _VECTOR_INDEX
+    if _VECTOR_INDEX is None:
+        vectors = embed_texts([_article_to_embedding_text(article) for article in LEGAL_KNOWLEDGE_BASE])
+        _VECTOR_INDEX = [
+            LegalVectorEntry(article=article, vector=vector)
+            for article, vector in zip(LEGAL_KNOWLEDGE_BASE, vectors)
+        ]
+    return _VECTOR_INDEX
+
+
+def _article_to_embedding_text(article: LegalArticle) -> str:
+    """把法条元数据合并成用于入库的 embedding 文本。"""
+
+    return f"{article.law_name}\n{article.article}\n{article.excerpt}\n{article.retrieval_text}"

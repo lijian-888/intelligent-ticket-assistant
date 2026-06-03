@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
 from app.db import get_db_status, init_db
+from app.embedding_client import get_embedding_config_status
 from app.graph import process_ticket, process_ticket_steps
 from app.llm_client import get_llm_config_status, ping_llm
 from app.mock_data import MOCK_TICKETS
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
                 "GET /db/status",
                 "GET /llm/config",
                 "GET /llm/health",
+                "GET /embedding/config",
                 "POST /process-all",
             ],
         }
@@ -142,6 +144,12 @@ def create_app() -> FastAPI:
                 "error": f"{type(exc).__name__}: {exc}",
                 "config": get_llm_config_status(),
             }
+
+    @app.get("/embedding/config")
+    def embedding_config() -> dict[str, Any]:
+        """查看脱敏后的向量模型配置状态，用于确认 bge-m3 地址是否生效。"""
+
+        return get_embedding_config_status()
 
     @app.post("/process-all", response_model=list[ProcessingResult])
     def process_all() -> list[ProcessingResult]:

@@ -87,9 +87,11 @@ class LegalReference(BaseModel):
     law_name: str
     article: str
     excerpt: str
-    matched_keywords: list[str] = Field(default_factory=list)
     relevance_score: float = 0.0
     reason: str = ""
+    retrieval_method: str = "vector"
+    embedding_model: str = ""
+    source_id: str = ""
 
 
 class ProcessingResult(BaseModel):

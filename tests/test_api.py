@@ -3,6 +3,7 @@ import pytest
 
 from app.api import create_app
 from app.db import get_connection, init_db
+from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
 from app.models import CaseNature, ProcessingResult, Ticket, TicketStatus
 from app.nodes import classify_case_nature, classify_case_nature_detail
 from app.supplement import build_supplement_task
@@ -77,6 +78,9 @@ def test_process_one_returns_related_legal_references():
     assert body["legal_references"]
     assert "中华人民共和国广告法" in law_names
     assert "中华人民共和国消费者权益保护法" in law_names
+    assert all(item["retrieval_method"] == "vector" for item in body["legal_references"])
+    assert all(item["embedding_model"] for item in body["legal_references"])
+    assert all(item["source_id"] for item in body["legal_references"])
 
 
 def test_smart_transfer_low_confidence_keeps_manual_recommendation():
@@ -358,6 +362,37 @@ def test_llm_config_endpoint_is_masked():
     assert response.status_code == 200
     assert "api_key_set" in body
     assert "api_key" not in body
+
+
+def test_embedding_config_endpoint_is_masked():
+    """向量模型配置接口应返回脱敏状态，不暴露 embedding API key。"""
+
+    response = client.get("/embedding/config")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["model"] == "bge-m3"
+    assert "api_key_set" in body
+    assert "api_key" not in body
+
+
+def test_embedding_remote_failure_falls_back_to_local_vector(monkeypatch):
+    """bge-m3 服务异常时，向量生成应降级到本地 demo 向量，避免工单处理接口中断。"""
+
+    monkeypatch.setattr("app.embedding_client.EMBEDDING_BASE_URL", "http://embedding.local")
+
+    def fake_remote_call(texts):
+        raise TimeoutError("embedding timeout")
+
+    monkeypatch.setattr("app.embedding_client._embed_texts_remote", fake_remote_call)
+
+    vectors = embed_texts(["虚假宣传要求赔偿"])
+    status = get_embedding_config_status()
+
+    assert len(vectors) == 1
+    assert get_embedding_runtime_model() == "local-demo-vector"
+    assert status["last_embedding_source"] == "fallback"
+    assert "TimeoutError" in status["last_error"]
 
 
 def test_classify_case_nature_uses_llm_when_configured(monkeypatch):
