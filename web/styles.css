@@ -402,6 +402,21 @@ ul.compact {
   padding-left: 18px;
 }
 
+.legal-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.legal-list li {
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+.legal-title {
+  color: #14345d;
+  font-weight: 700;
+}
+
 @media (max-width: 1100px) {
   .detail-grid {
     grid-template-columns: 1fr;

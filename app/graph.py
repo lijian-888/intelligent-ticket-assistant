@@ -15,6 +15,7 @@ from app.nodes import (
     infer_missing_required_fields,
     precheck_acceptance,
     recommend_branch,
+    retrieve_legal_references_node,
     review_with_llm,
     structure_ticket,
     validate_completeness,
@@ -32,6 +33,7 @@ def build_graph():
 
     graph = StateGraph(TicketState)
     graph.add_node("structure_ticket", structure_ticket)
+    graph.add_node("retrieve_legal_references", retrieve_legal_references_node)
     graph.add_node("assess_professional_claimant", assess_professional_claimant)
     graph.add_node("precheck_acceptance", precheck_acceptance)
     graph.add_node("infer_missing_required_fields", infer_missing_required_fields)
@@ -44,7 +46,8 @@ def build_graph():
     graph.add_node("build_result", build_result)
 
     graph.set_entry_point("structure_ticket")
-    graph.add_edge("structure_ticket", "assess_professional_claimant")
+    graph.add_edge("structure_ticket", "retrieve_legal_references")
+    graph.add_edge("retrieve_legal_references", "assess_professional_claimant")
     graph.add_edge("assess_professional_claimant", "precheck_acceptance")
     graph.add_conditional_edges(
         "precheck_acceptance",

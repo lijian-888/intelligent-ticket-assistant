@@ -180,6 +180,7 @@ function renderAiResultHtml(result) {
     ${renderDecisionCard(result)}
     ${renderAutomationCard(result)}
     ${renderStructureCard(result)}
+    ${renderLegalReferenceCard(result)}
     ${renderRiskCard(result)}
     ${renderOperationCard(result)}
   `;
@@ -245,6 +246,25 @@ function renderRiskCard(result) {
         <div class="key">职业索赔</div><div>${badge(result.professional_claimant_risk, riskColor(result.professional_claimant_risk))}</div>
         <div class="key">风险原因</div><div>${list(result.professional_claimant_reasons)}</div>
       </div>
+    </div>`;
+}
+
+function renderLegalReferenceCard(result) {
+  const references = result.legal_references || [];
+  const content = references.length
+    ? `<ul class="legal-list">${references.map((item) => `
+        <li>
+          <div class="legal-title">${escapeHtml(item.law_name)} ${escapeHtml(item.article)}</div>
+          <div>${escapeHtml(item.excerpt || "-")}</div>
+          <div class="muted">相关关键词：${escapeHtml((item.matched_keywords || []).join("，") || "-")}；匹配度：${Number(item.relevance_score || 0).toFixed(2)}</div>
+          <div class="muted">参考原因：${escapeHtml(item.reason || "-")}</div>
+        </li>
+      `).join("")}</ul>`
+    : "<span class='muted'>未检索到明显相关法条。</span>";
+  return `
+    <div class="result-card">
+      <h3>法律条款参考</h3>
+      ${content}
     </div>`;
 }
 

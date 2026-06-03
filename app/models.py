@@ -81,6 +81,17 @@ class StructuredTicket(BaseModel):
     keywords: list[str] = Field(default_factory=list)
 
 
+class LegalReference(BaseModel):
+    """知识库检索出的可能相关法律条款，供工作人员办理时参考。"""
+
+    law_name: str
+    article: str
+    excerpt: str
+    matched_keywords: list[str] = Field(default_factory=list)
+    relevance_score: float = 0.0
+    reason: str = ""
+
+
 class ProcessingResult(BaseModel):
     """LangGraph 全流程处理后的结果，供接口返回或后续写回工单系统。"""
 
@@ -99,6 +110,7 @@ class ProcessingResult(BaseModel):
     mediation_advice: str
     professional_claimant_risk: Literal["低", "中", "高"]
     professional_claimant_reasons: list[str] = Field(default_factory=list)
+    legal_references: list[LegalReference] = Field(default_factory=list)
     return_reason: str = ""
     llm_review: dict[str, Any] = Field(default_factory=dict)
     actions: list[dict[str, Any]] = Field(default_factory=list)
@@ -138,6 +150,7 @@ class TicketState(TypedDict, total=False):
     mediation_advice: str
     professional_claimant_risk: Literal["低", "中", "高"]
     professional_claimant_reasons: list[str]
+    legal_references: list[LegalReference]
     return_reason: str
     llm_review: dict[str, Any]
     status: TicketStatus

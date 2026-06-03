@@ -32,6 +32,7 @@ from app.llm_schemas import (
     TicketReviewLlmOutput,
     TicketReviewLlmResult,
 )
+from app.legal_kb import retrieve_legal_references
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketState, TicketStatus
 from app.rules import (
     BRANCH_BY_REGION,
@@ -421,6 +422,17 @@ def validate_completeness(state: TicketState) -> TicketState:
         "missing_fields": missing,
         "recommended_supplement_fields": recommended_missing,
         "supplement_call_script": script,
+    }
+
+
+def retrieve_legal_references_node(state: TicketState) -> TicketState:
+    """LangGraph 节点：从 mock 法律知识库中检索工单可能涉及的法律条款。"""
+
+    return {
+        "legal_references": retrieve_legal_references(
+            state["ticket"],
+            state["structured"],
+        )
     }
 
 
@@ -872,6 +884,7 @@ def build_result(state: TicketState) -> TicketState:
         mediation_advice=state["mediation_advice"],
         professional_claimant_risk=state["professional_claimant_risk"],
         professional_claimant_reasons=state.get("professional_claimant_reasons", []),
+        legal_references=state.get("legal_references", []),
         return_reason=state.get("return_reason", ""),
         llm_review=state.get("llm_review", {}),
         actions=state.get("actions", []),

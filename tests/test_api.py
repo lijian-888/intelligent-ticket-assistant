@@ -66,6 +66,19 @@ def test_process_one_classifies_complaint():
     assert body["actions"][0]["tool"] == "transfer_ticket"
 
 
+def test_process_one_returns_related_legal_references():
+    """虚假宣传、医疗功效和赔偿类工单应检索出相关法律条款供工作人员参考。"""
+
+    response = client.post("/tickets/DEMO-TICKET-001/process")
+    body = response.json()
+    law_names = [item["law_name"] for item in body["legal_references"]]
+
+    assert response.status_code == 200
+    assert body["legal_references"]
+    assert "中华人民共和国广告法" in law_names
+    assert "中华人民共和国消费者权益保护法" in law_names
+
+
 def test_smart_transfer_low_confidence_keeps_manual_recommendation():
     """置信度不足时，智能流转只给出推荐动作，不自动执行接口。"""
 
@@ -260,6 +273,7 @@ def test_process_steps_returns_langgraph_nodes():
 
     assert response.status_code == 200
     assert "structure_ticket" in nodes
+    assert "retrieve_legal_references" in nodes
     assert "infer_missing_required_fields" in nodes
     assert "decide_action" in nodes
     assert "build_result" in nodes
