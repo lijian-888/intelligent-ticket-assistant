@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>补充信息任务 - 市场监管工单智能处理演示</title>
+  <link rel="stylesheet" href="/demo/styles.css?v=20260603-3" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>补充信息任务</h1>
+      <p>工作人员电话核实核心字段缺失的工单</p>
+    </div>
+    <div class="top-actions">
+      <button id="backBtn" class="btn secondary">返回工单列表</button>
+      <button id="refreshBtn" class="btn primary">刷新任务</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel list-panel">
+      <div class="panel-title">
+        <h2>待电话核实任务</h2>
+        <span id="taskCount" class="muted">0 条</span>
+      </div>
+      <div class="table-wrap">
+        <table class="ticket-table">
+          <thead>
+            <tr>
+              <th>工单编号</th>
+              <th>标题</th>
+              <th>提交人</th>
+              <th>联系电话</th>
+              <th>优先级</th>
+              <th>缺失阻断字段</th>
+              <th>建议核实字段</th>
+              <th>电话话术</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="taskRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/demo/common.js?v=20260603-3"></script>
+  <script src="/demo/supplement-tasks.js?v=20260603-3"></script>
+</body>
+</html>
