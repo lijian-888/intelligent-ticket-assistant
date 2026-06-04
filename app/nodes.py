@@ -20,14 +20,20 @@ from app.llm_client import (
 from app.llm_schemas import (
     ACCEPTANCE_PRECHECK_PROMPT_VERSION,
     CLASSIFY_CASE_NATURE_PROMPT_VERSION,
+    EMOTION_ANALYSIS_PROMPT_VERSION,
     MISSING_REQUIRED_FIELDS_PROMPT_VERSION,
+    PROFESSIONAL_CLAIMANT_PROMPT_VERSION,
     REVIEW_PROMPT_VERSION,
     AcceptancePrecheckLlmOutput,
     AcceptancePrecheckLlmResult,
     CaseNatureLlmOutput,
     CaseNatureLlmResult,
+    EmotionAnalysisLlmOutput,
+    EmotionAnalysisLlmResult,
     MissingRequiredFieldsLlmOutput,
     MissingRequiredFieldsLlmResult,
+    ProfessionalClaimantLlmOutput,
+    ProfessionalClaimantLlmResult,
     LlmAudit,
     TicketReviewLlmOutput,
     TicketReviewLlmResult,
@@ -501,10 +507,9 @@ def _is_definitely_non_national_ticket(ticket: Ticket, structured: StructuredTic
     return any(hint in text for hint in non_national_hints)
 
 
-def analyze_emotion(state: TicketState) -> TicketState:
-    """LangGraph 节点：识别提交人情绪强度，并生成调解参考建议。"""
+def analyze_emotion_by_rule(ticket: Ticket) -> tuple[Literal["低", "中", "高"], str]:
+    """规则兜底：用关键词识别提交人情绪强度。"""
 
-    ticket = state["ticket"]
     text = f"{ticket.title} {ticket.content} {ticket.appeal_emotion}"
     high_words = ["非常生气", "愤怒", "投诉到底", "曝光", "媒体", "不处理", "继续投诉举报"]
     medium_words = ["多次沟通", "拖延", "要求尽快", "不满", "无果"]
@@ -519,14 +524,79 @@ def analyze_emotion(state: TicketState) -> TicketState:
         level = "低"
         advice = "按常规流程处理，联系提交人确认关键事实后流转属地承办单位办理。"
 
-    return {"emotion_level": level, "mediation_advice": advice}
+    return level, advice
 
 
-def assess_professional_claimant(state: TicketState) -> TicketState:
-    """LangGraph 节点：用可解释评分识别疑似职业打假/职业索赔风险。"""
+def analyze_emotion(state: TicketState) -> TicketState:
+    """LangGraph 节点：LLM 优先识别提交人情绪强度，规则关键词兜底。"""
 
     ticket = state["ticket"]
-    structured = state["structured"]
+    audit = LlmAudit(
+        prompt_version=EMOTION_ANALYSIS_PROMPT_VERSION,
+        model=LLM_MODEL,
+        confidence_threshold=LLM_CONFIDENCE_THRESHOLD,
+    )
+
+    if is_llm_configured():
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是市场监管投诉举报工单情绪分析助手。"
+                    "请根据提交人的标题、正文、诉求和已有情绪字段判断情绪等级，只能输出“低”“中”“高”。"
+                    "低：表达平稳或只陈述事实；中：有不满、催办、多次沟通无果；"
+                    "高：明显愤怒、强烈施压、威胁曝光/媒体/继续投诉举报或要求立即处理。"
+                    "请给出适合工作人员使用的调解参考建议。只输出 JSON。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "请按 schema 输出："
+                    '{"emotion_level":"低|中|高","confidence":0.0,"reason":"判断依据","mediation_advice":"调解建议"}'
+                    f"\n标题：{ticket.title}"
+                    f"\n工单内容：{ticket.content}"
+                    f"\n诉求目的：{ticket.appeal_purpose}"
+                    f"\n原始情绪字段：{ticket.appeal_emotion}"
+                ),
+            },
+        ]
+        try:
+            raw_result = call_llm_json(messages, timeout_seconds=LLM_CLASSIFY_TIMEOUT_SECONDS)
+            output = EmotionAnalysisLlmOutput.model_validate(raw_result)
+            llm_result = EmotionAnalysisLlmResult(output=output, raw=raw_result, audit=audit)
+            if output.confidence >= LLM_CONFIDENCE_THRESHOLD:
+                llm_result.audit.accepted = True
+                return {
+                    "emotion_level": output.emotion_level,
+                    "mediation_advice": output.mediation_advice,
+                    "emotion_analysis": llm_result.model_dump(mode="json"),
+                }
+            llm_result.error = f"LLM 置信度 {output.confidence} 低于阈值 {LLM_CONFIDENCE_THRESHOLD}"
+            llm_result.audit.reject_reason = llm_result.error
+        except ValidationError as exc:
+            error = f"LLM 输出 schema 校验失败：{exc.errors()}"
+            audit.reject_reason = error
+            llm_result = EmotionAnalysisLlmResult(raw=locals().get("raw_result", {}), audit=audit, error=error)
+        except Exception as exc:
+            error = f"大模型情绪分析失败：{type(exc).__name__}: {exc}"
+            audit.reject_reason = error
+            llm_result = EmotionAnalysisLlmResult(raw=locals().get("raw_result", {}), audit=audit, error=error)
+    else:
+        audit.reject_reason = "未配置 LLM_BASE_URL 或 LLM_API_KEY"
+        llm_result = EmotionAnalysisLlmResult(enabled=False, audit=audit, error=audit.reject_reason)
+
+    level, advice = analyze_emotion_by_rule(ticket)
+    return {
+        "emotion_level": level,
+        "mediation_advice": f"{advice}（LLM情绪分析未采纳，已使用规则兜底）",
+        "emotion_analysis": llm_result.model_dump(mode="json"),
+    }
+
+
+def assess_professional_claimant_by_rule(ticket: Ticket, structured: StructuredTicket) -> tuple[Literal["低", "中", "高"], list[str]]:
+    """规则兜底：用可解释评分识别疑似职业打假/职业索赔风险。"""
+
     text = f"{ticket.title} {ticket.content} {ticket.appeal_purpose}"
     reasons: list[str] = []
     score = 0
@@ -603,7 +673,79 @@ def assess_professional_claimant(state: TicketState) -> TicketState:
     else:
         risk = "低"
 
-    return {"professional_claimant_risk": risk, "professional_claimant_reasons": reasons}
+    return risk, reasons
+
+
+def assess_professional_claimant(state: TicketState) -> TicketState:
+    """LangGraph 节点：LLM 优先识别疑似职业打假/职业索赔风险，规则评分兜底。"""
+
+    ticket = state["ticket"]
+    structured = state["structured"]
+    audit = LlmAudit(
+        prompt_version=PROFESSIONAL_CLAIMANT_PROMPT_VERSION,
+        model=LLM_MODEL,
+        confidence_threshold=LLM_CONFIDENCE_THRESHOLD,
+    )
+
+    if is_llm_configured():
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是市场监管投诉举报工单职业打假/职业索赔风险识别助手。"
+                    "你的结论只用于提醒工作人员关注沟通方式和证据核验，不能作为退单、不受理或降低处理优先级依据。"
+                    "请基于单条工单文本、消费金额、诉求次数、法律术语、批量维权特征、惩罚性赔偿话术等判断风险等级。"
+                    "如果没有历史投诉数据，不能仅凭普通投诉直接判高风险；"
+                    "但文本出现多次购买、知假买假、十倍赔偿、专业法条、批量维权等强信号时，可以提高风险等级。"
+                    "只输出 JSON。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "请按 schema 输出："
+                    '{"professional_claimant_risk":"低|中|高","confidence":0.0,"reasons":["判断依据"]}'
+                    f"\n标题：{ticket.title}"
+                    f"\n工单内容：{ticket.content}"
+                    f"\n诉求目的：{ticket.appeal_purpose}"
+                    f"\n诉求次数：{ticket.appeal_count}"
+                    f"\n消费金额：{structured.amount}"
+                    f"\n关键词：{json.dumps(structured.keywords, ensure_ascii=False)}"
+                    f"\n工单性质：{structured.case_nature.value}"
+                ),
+            },
+        ]
+        try:
+            raw_result = call_llm_json(messages, timeout_seconds=LLM_CLASSIFY_TIMEOUT_SECONDS)
+            output = ProfessionalClaimantLlmOutput.model_validate(raw_result)
+            llm_result = ProfessionalClaimantLlmResult(output=output, raw=raw_result, audit=audit)
+            if output.confidence >= LLM_CONFIDENCE_THRESHOLD:
+                llm_result.audit.accepted = True
+                return {
+                    "professional_claimant_risk": output.professional_claimant_risk,
+                    "professional_claimant_reasons": output.reasons,
+                    "professional_claimant_llm_result": llm_result.model_dump(mode="json"),
+                }
+            llm_result.error = f"LLM 置信度 {output.confidence} 低于阈值 {LLM_CONFIDENCE_THRESHOLD}"
+            llm_result.audit.reject_reason = llm_result.error
+        except ValidationError as exc:
+            error = f"LLM 输出 schema 校验失败：{exc.errors()}"
+            audit.reject_reason = error
+            llm_result = ProfessionalClaimantLlmResult(raw=locals().get("raw_result", {}), audit=audit, error=error)
+        except Exception as exc:
+            error = f"大模型职业索赔风险识别失败：{type(exc).__name__}: {exc}"
+            audit.reject_reason = error
+            llm_result = ProfessionalClaimantLlmResult(raw=locals().get("raw_result", {}), audit=audit, error=error)
+    else:
+        audit.reject_reason = "未配置 LLM_BASE_URL 或 LLM_API_KEY"
+        llm_result = ProfessionalClaimantLlmResult(enabled=False, audit=audit, error=audit.reject_reason)
+
+    risk, reasons = assess_professional_claimant_by_rule(ticket, structured)
+    return {
+        "professional_claimant_risk": risk,
+        "professional_claimant_reasons": [*reasons, "LLM职业索赔风险识别未采纳，已使用规则评分兜底。"],
+        "professional_claimant_llm_result": llm_result.model_dump(mode="json"),
+    }
 
 
 def precheck_acceptance_by_rule(state: TicketState) -> tuple[bool, str]:
@@ -910,8 +1052,10 @@ def build_result(state: TicketState) -> TicketState:
         recommended_branch=state.get("recommended_branch", ""),
         transfer_reason=state.get("transfer_reason", ""),
         emotion_level=state["emotion_level"],
+        emotion_analysis=state.get("emotion_analysis", {}),
         mediation_advice=state["mediation_advice"],
         professional_claimant_risk=state["professional_claimant_risk"],
+        professional_claimant_llm_result=state.get("professional_claimant_llm_result", {}),
         professional_claimant_reasons=state.get("professional_claimant_reasons", []),
         legal_references=state.get("legal_references", []),
         return_reason=state.get("return_reason", ""),

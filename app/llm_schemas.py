@@ -10,6 +10,8 @@ CLASSIFY_CASE_NATURE_PROMPT_VERSION = "case_nature_classifier_v1"
 REVIEW_PROMPT_VERSION = "ticket_review_v1"
 MISSING_REQUIRED_FIELDS_PROMPT_VERSION = "missing_required_fields_infer_v1"
 ACCEPTANCE_PRECHECK_PROMPT_VERSION = "acceptance_precheck_v1"
+EMOTION_ANALYSIS_PROMPT_VERSION = "emotion_analysis_v1"
+PROFESSIONAL_CLAIMANT_PROMPT_VERSION = "professional_claimant_v1"
 DEFAULT_LLM_CONFIDENCE_THRESHOLD = 0.75
 
 
@@ -106,6 +108,43 @@ class AcceptancePrecheckLlmResult(BaseModel):
 
     enabled: bool = True
     output: AcceptancePrecheckLlmOutput | None = None
+    raw: dict = Field(default_factory=dict)
+    audit: LlmAudit
+    error: str = ""
+
+
+class EmotionAnalysisLlmOutput(BaseModel):
+    """提交人情绪等级分析的大模型输出 schema。"""
+
+    emotion_level: Literal["低", "中", "高"]
+    confidence: float = Field(ge=0, le=1)
+    reason: str = Field(min_length=1)
+    mediation_advice: str = Field(min_length=1)
+
+
+class EmotionAnalysisLlmResult(BaseModel):
+    """情绪等级分析的完整模型结果。"""
+
+    enabled: bool = True
+    output: EmotionAnalysisLlmOutput | None = None
+    raw: dict = Field(default_factory=dict)
+    audit: LlmAudit
+    error: str = ""
+
+
+class ProfessionalClaimantLlmOutput(BaseModel):
+    """职业打假/职业索赔风险的大模型输出 schema。"""
+
+    professional_claimant_risk: Literal["低", "中", "高"]
+    confidence: float = Field(ge=0, le=1)
+    reasons: list[str] = Field(default_factory=list, min_length=1)
+
+
+class ProfessionalClaimantLlmResult(BaseModel):
+    """职业打假/职业索赔风险的完整模型结果。"""
+
+    enabled: bool = True
+    output: ProfessionalClaimantLlmOutput | None = None
     raw: dict = Field(default_factory=dict)
     audit: LlmAudit
     error: str = ""

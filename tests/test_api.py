@@ -4,8 +4,8 @@ import pytest
 from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
-from app.models import CaseNature, ProcessingResult, Ticket, TicketStatus
-from app.nodes import classify_case_nature, classify_case_nature_detail
+from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
+from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
 from app.supplement import build_supplement_task
 
@@ -557,6 +557,77 @@ def test_low_confidence_inferred_required_fields_are_not_used(monkeypatch):
     assert response.status_code == 200
     assert "联系电话" in body["missing_fields"]
     assert body["status"] == "待补充"
+
+
+def test_analyze_emotion_uses_llm_when_configured(monkeypatch):
+    """配置了 LLM 时，情绪等级应优先采用模型返回结果。"""
+
+    monkeypatch.setattr("app.nodes.is_llm_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.nodes.call_llm_json",
+        lambda messages, **kwargs: {
+            "emotion_level": "高",
+            "confidence": 0.92,
+            "reason": "模型识别到强烈施压表达。",
+            "mediation_advice": "建议优先回访并明确办理时限。",
+        },
+    )
+
+    result = analyze_emotion(
+        {
+            "ticket": Ticket(
+                ticket_no="TEST_EMOTION",
+                title="要求马上处理",
+                content="提交人表示如果不处理就继续投诉。",
+            )
+        }
+    )
+
+    assert result["emotion_level"] == "高"
+    assert result["mediation_advice"] == "建议优先回访并明确办理时限。"
+    assert result["emotion_analysis"]["audit"]["accepted"] is True
+
+
+def test_professional_claimant_uses_llm_when_configured(monkeypatch):
+    """配置了 LLM 时，职业索赔风险应优先采用模型返回结果。"""
+
+    monkeypatch.setattr("app.nodes.is_llm_configured", lambda: True)
+    monkeypatch.setattr(
+        "app.nodes.call_llm_json",
+        lambda messages, **kwargs: {
+            "professional_claimant_risk": "中",
+            "confidence": 0.9,
+            "reasons": ["模型识别到惩罚性赔偿和专业法条表述，但缺少历史数据。"],
+        },
+    )
+    ticket = Ticket(
+        ticket_no="TEST_RISK",
+        title="要求十倍赔偿",
+        content="依据食品安全法第一百四十八条要求十倍赔偿。",
+        appeal_purpose="十倍赔偿",
+    )
+    structured = StructuredTicket(
+        ticket_no=ticket.ticket_no,
+        title=ticket.title,
+        raw_content=ticket.content,
+        case_nature=CaseNature.COMPLAINT,
+        case_nature_reason="测试",
+        complainant_name="",
+        contact_phone="",
+        incident_address="",
+        region="",
+        respondent="",
+        appeal="十倍赔偿",
+        incident_at="",
+        amount=20,
+        keywords=["十倍赔偿"],
+    )
+
+    result = assess_professional_claimant({"ticket": ticket, "structured": structured})
+
+    assert result["professional_claimant_risk"] == "中"
+    assert result["professional_claimant_reasons"] == ["模型识别到惩罚性赔偿和专业法条表述，但缺少历史数据。"]
+    assert result["professional_claimant_llm_result"]["audit"]["accepted"] is True
 
 
 def test_professional_claimant_high_risk_explains_score():

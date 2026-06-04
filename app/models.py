@@ -112,8 +112,10 @@ class ProcessingResult(BaseModel):
     recommended_branch: str = ""
     transfer_reason: str = ""
     emotion_level: Literal["低", "中", "高"]
+    emotion_analysis: dict[str, Any] = Field(default_factory=dict)
     mediation_advice: str
     professional_claimant_risk: Literal["低", "中", "高"]
+    professional_claimant_llm_result: dict[str, Any] = Field(default_factory=dict)
     professional_claimant_reasons: list[str] = Field(default_factory=list)
     legal_references: list[LegalReference] = Field(default_factory=list)
     return_reason: str = ""
@@ -153,8 +155,10 @@ class TicketState(TypedDict, total=False):
     recommended_branch: str
     transfer_reason: str
     emotion_level: Literal["低", "中", "高"]
+    emotion_analysis: dict[str, Any]
     mediation_advice: str
     professional_claimant_risk: Literal["低", "中", "高"]
+    professional_claimant_llm_result: dict[str, Any]
     professional_claimant_reasons: list[str]
     legal_references: list[LegalReference]
     return_reason: str
