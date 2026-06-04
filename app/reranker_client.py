@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 
 load_dotenv()
@@ -28,36 +28,54 @@ class RerankResult:
     score: float
 
 
+@dataclass(frozen=True)
+class RerankerConfig:
+    """reranker 运行时配置，优先读取当前 .env，避免模块导入时缓存旧值。"""
+
+    base_url: str
+    api_key: str
+    model: str
+    timeout_seconds: float
+
+
 def is_reranker_configured() -> bool:
     """判断是否配置了 reranker 服务地址。"""
 
-    return bool(RERANKER_BASE_URL)
+    return bool(_read_reranker_config().base_url)
 
 
 def get_reranker_config_status() -> dict[str, Any]:
     """返回脱敏后的 reranker 配置状态。"""
 
+    config = _read_reranker_config()
     return {
         "configured": is_reranker_configured(),
-        "base_url": RERANKER_BASE_URL,
-        "model": RERANKER_MODEL,
-        "timeout_seconds": RERANKER_TIMEOUT_SECONDS,
-        "api_key_set": bool(RERANKER_API_KEY),
+        "base_url": config.base_url,
+        "model": config.model,
+        "timeout_seconds": config.timeout_seconds,
+        "api_key_set": bool(config.api_key),
         "last_reranker_source": _LAST_RERANKER_SOURCE,
         "last_error": _LAST_RERANKER_ERROR,
     }
+
+
+def get_reranker_runtime_model() -> str:
+    """返回当前配置的 reranker 模型名称。"""
+
+    return _read_reranker_config().model
 
 
 def rerank_documents(query: str, documents: list[str], top_n: int) -> list[RerankResult]:
     """调用 OpenAI-compatible rerank 接口；失败时返回空列表，由上游回退向量分数。"""
 
     global _LAST_RERANKER_ERROR, _LAST_RERANKER_SOURCE
-    if not query or not documents or not is_reranker_configured():
+    config = _read_reranker_config()
+    if not query or not documents or not config.base_url:
         _LAST_RERANKER_SOURCE = "disabled"
         _LAST_RERANKER_ERROR = ""
         return []
     try:
-        results = _rerank_documents_remote(query, documents, top_n)
+        results = _rerank_documents_remote(query, documents, top_n, config)
         _LAST_RERANKER_SOURCE = "remote"
         _LAST_RERANKER_ERROR = ""
         return results
@@ -67,26 +85,49 @@ def rerank_documents(query: str, documents: list[str], top_n: int) -> list[Reran
         return []
 
 
-def _rerank_documents_remote(query: str, documents: list[str], top_n: int) -> list[RerankResult]:
+def _read_reranker_config() -> RerankerConfig:
+    """从 .env.example、.env 和系统环境变量读取最新 reranker 配置。"""
+
+    values: dict[str, Any] = {}
+    values.update(dotenv_values(".env.example"))
+    values.update(dotenv_values(".env"))
+    for key in ("RERANKER_BASE_URL", "RERANKER_API_KEY", "RERANKER_MODEL", "RERANKER_TIMEOUT_SECONDS"):
+        env_value = os.getenv(key)
+        if env_value not in (None, ""):
+            values[key] = env_value
+    return RerankerConfig(
+        base_url=str(values.get("RERANKER_BASE_URL") or "").rstrip("/"),
+        api_key=str(values.get("RERANKER_API_KEY") or ""),
+        model=str(values.get("RERANKER_MODEL") or "bge-reranker-v2-m3"),
+        timeout_seconds=float(values.get("RERANKER_TIMEOUT_SECONDS") or 30),
+    )
+
+
+def _rerank_documents_remote(
+    query: str,
+    documents: list[str],
+    top_n: int,
+    config: RerankerConfig,
+) -> list[RerankResult]:
     """调用 rerank 接口，并兼容 /v1/rerank 与 /rerank 两种常见路径。"""
 
     headers = {"Content-Type": "application/json"}
-    if RERANKER_API_KEY:
-        headers["Authorization"] = f"Bearer {RERANKER_API_KEY}"
+    if config.api_key:
+        headers["Authorization"] = f"Bearer {config.api_key}"
     payload = {
-        "model": RERANKER_MODEL,
+        "model": config.model,
         "query": query,
         "documents": documents,
         "top_n": top_n,
     }
 
     last_response = None
-    for endpoint in _candidate_rerank_endpoints():
+    for endpoint in _candidate_rerank_endpoints(config.base_url):
         response = requests.post(
             endpoint,
             headers=headers,
             json=payload,
-            timeout=RERANKER_TIMEOUT_SECONDS,
+            timeout=config.timeout_seconds,
         )
         if response.status_code != 404:
             response.raise_for_status()
@@ -99,13 +140,13 @@ def _rerank_documents_remote(query: str, documents: list[str], top_n: int) -> li
     return []
 
 
-def _candidate_rerank_endpoints() -> list[str]:
+def _candidate_rerank_endpoints(base_url: str) -> list[str]:
     """根据配置地址生成候选 reranker 路径。"""
 
-    if RERANKER_BASE_URL.endswith("/v1"):
-        root = RERANKER_BASE_URL[:-3]
-        return [f"{RERANKER_BASE_URL}/rerank", f"{root}/rerank"]
-    return [f"{RERANKER_BASE_URL}/v1/rerank", f"{RERANKER_BASE_URL}/rerank"]
+    if base_url.endswith("/v1"):
+        root = base_url[:-3]
+        return [f"{base_url}/rerank", f"{root}/rerank"]
+    return [f"{base_url}/v1/rerank", f"{base_url}/rerank"]
 
 
 def _parse_rerank_response(body: dict[str, Any]) -> list[RerankResult]:

@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from app.embedding_client import cosine_similarity, embed_texts, get_embedding_runtime_model
 from app.models import LegalReference, StructuredTicket, Ticket
-from app.reranker_client import RERANKER_MODEL, rerank_documents
+from app.reranker_client import get_reranker_runtime_model, rerank_documents
 
 
 load_dotenv()
@@ -200,7 +200,7 @@ def _rerank_candidates(query_text: str, candidates: list[LegalCandidate]) -> lis
                 vector_score=candidate.vector_score,
                 final_score=item.score,
                 rerank_score=item.score,
-                reranker_model=RERANKER_MODEL,
+                reranker_model=get_reranker_runtime_model(),
             )
         )
     return updated or candidates
