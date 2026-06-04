@@ -256,12 +256,13 @@ function renderLegalReferenceCard(result) {
         <li>
           <div class="legal-title">${escapeHtml(item.law_name)} ${escapeHtml(item.article)}</div>
           <div>${escapeHtml(item.excerpt || "-")}</div>
-          <div class="muted">检索方式：${escapeHtml(item.retrieval_method || "vector")}；向量模型：${escapeHtml(item.embedding_model || "-")}；匹配度：${Number(item.relevance_score || 0).toFixed(2)}</div>
+          <div class="muted">检索方式：${escapeHtml(item.retrieval_method || "vector")}；向量模型：${escapeHtml(item.embedding_model || "-")}；重排模型：${escapeHtml(item.reranker_model || "-")}</div>
+          <div class="muted">最终分数：${Number(item.relevance_score || 0).toFixed(2)}；向量分数：${Number(item.vector_score || 0).toFixed(2)}；重排分数：${Number(item.rerank_score || 0).toFixed(2)}</div>
           <div class="muted">知识库编号：${escapeHtml(item.source_id || "-")}</div>
           <div class="muted">参考原因：${escapeHtml(item.reason || "-")}</div>
         </li>
       `).join("")}</ul>`
-    : "<span class='muted'>未检索到明显相关法条。</span>";
+    : "<span class='muted'>无相关法律条款达到当前分数要求。</span>";
   return `
     <div class="result-card">
       <h3>法律条款参考</h3>

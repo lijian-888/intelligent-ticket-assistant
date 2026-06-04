@@ -6,6 +6,7 @@ from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
 from app.models import CaseNature, ProcessingResult, Ticket, TicketStatus
 from app.nodes import classify_case_nature, classify_case_nature_detail
+from app.reranker_client import _parse_rerank_response
 from app.supplement import build_supplement_task
 
 
@@ -68,7 +69,7 @@ def test_process_one_classifies_complaint():
 
 
 def test_process_one_returns_related_legal_references():
-    """虚假宣传、医疗功效和赔偿类工单应检索出相关法律条款供工作人员参考。"""
+    """法律条款混合检索应返回通过阈值过滤后的少量候选。"""
 
     response = client.post("/tickets/DEMO-TICKET-001/process")
     body = response.json()
@@ -76,11 +77,12 @@ def test_process_one_returns_related_legal_references():
 
     assert response.status_code == 200
     assert body["legal_references"]
-    assert "中华人民共和国广告法" in law_names
     assert "中华人民共和国消费者权益保护法" in law_names
-    assert all(item["retrieval_method"] == "vector" for item in body["legal_references"])
+    assert len(body["legal_references"]) <= 3
+    assert all(item["retrieval_method"] in {"vector", "hybrid_vector_rerank"} for item in body["legal_references"])
     assert all(item["embedding_model"] for item in body["legal_references"])
     assert all(item["source_id"] for item in body["legal_references"])
+    assert all(item["relevance_score"] >= 0.55 for item in body["legal_references"])
 
 
 def test_smart_transfer_low_confidence_keeps_manual_recommendation():
@@ -376,6 +378,19 @@ def test_embedding_config_endpoint_is_masked():
     assert "api_key" not in body
 
 
+def test_retrieval_config_endpoint_contains_reranker_settings():
+    """混合检索配置接口应包含法律检索、embedding 和 reranker 脱敏配置。"""
+
+    response = client.get("/retrieval/config")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["legal_retrieval"]["display_top_k"] == 3
+    assert "embedding" in body
+    assert "reranker" in body
+    assert "api_key" not in body["reranker"]
+
+
 def test_embedding_remote_failure_falls_back_to_local_vector(monkeypatch):
     """bge-m3 服务异常时，向量生成应降级到本地 demo 向量，避免工单处理接口中断。"""
 
@@ -393,6 +408,22 @@ def test_embedding_remote_failure_falls_back_to_local_vector(monkeypatch):
     assert get_embedding_runtime_model() == "local-demo-vector"
     assert status["last_embedding_source"] == "fallback"
     assert "TimeoutError" in status["last_error"]
+
+
+def test_reranker_response_scores_are_normalized():
+    """reranker 原始 logit 分数应归一化为 0-1，便于按阈值过滤。"""
+
+    results = _parse_rerank_response(
+        {
+            "results": [
+                {"index": 0, "relevance_score": -2.0},
+                {"index": 1, "relevance_score": 2.0},
+            ]
+        }
+    )
+
+    assert 0 < results[0].score < 0.5
+    assert 0.5 < results[1].score < 1
 
 
 def test_classify_case_nature_uses_llm_when_configured(monkeypatch):

@@ -10,9 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from app.db import get_db_status, init_db
 from app.embedding_client import get_embedding_config_status
 from app.graph import process_ticket, process_ticket_steps
+from app.legal_kb import get_legal_retrieval_config_status
 from app.llm_client import get_llm_config_status, ping_llm
 from app.mock_data import MOCK_TICKETS
 from app.models import ProcessingResult, SupplementTask, Ticket
+from app.reranker_client import get_reranker_config_status
 from app.smart_transfer import smart_transfer_ticket
 from app.supplement import create_or_update_supplement_task, list_saved_supplement_tasks
 
@@ -52,6 +54,7 @@ def create_app() -> FastAPI:
                 "GET /llm/config",
                 "GET /llm/health",
                 "GET /embedding/config",
+                "GET /retrieval/config",
                 "POST /process-all",
             ],
         }
@@ -150,6 +153,16 @@ def create_app() -> FastAPI:
         """查看脱敏后的向量模型配置状态，用于确认 bge-m3 地址是否生效。"""
 
         return get_embedding_config_status()
+
+    @app.get("/retrieval/config")
+    def retrieval_config() -> dict[str, Any]:
+        """查看法律条款混合检索配置，包括 embedding、reranker 和阈值。"""
+
+        return {
+            "legal_retrieval": get_legal_retrieval_config_status(),
+            "embedding": get_embedding_config_status(),
+            "reranker": get_reranker_config_status(),
+        }
 
     @app.post("/process-all", response_model=list[ProcessingResult])
     def process_all() -> list[ProcessingResult]:

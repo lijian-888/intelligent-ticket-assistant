@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+
+from dotenv import load_dotenv
 
 from app.embedding_client import cosine_similarity, embed_texts, get_embedding_runtime_model
 from app.models import LegalReference, StructuredTicket, Ticket
+from app.reranker_client import RERANKER_MODEL, rerank_documents
+
+
+load_dotenv()
+load_dotenv(".env.example", override=False)
+
+LEGAL_VECTOR_TOP_K = int(os.getenv("LEGAL_VECTOR_TOP_K", "10"))
+LEGAL_DISPLAY_TOP_K = int(os.getenv("LEGAL_DISPLAY_TOP_K", "3"))
+LEGAL_MIN_RELEVANCE_SCORE = float(os.getenv("LEGAL_MIN_RELEVANCE_SCORE", "0.55"))
+LEGAL_ENABLE_RERANKER = os.getenv("LEGAL_ENABLE_RERANKER", "true").lower() == "true"
 
 
 @dataclass(frozen=True)
@@ -25,6 +38,17 @@ class LegalVectorEntry:
     article: LegalArticle
     vector: list[float]
     embedding_model: str
+
+
+@dataclass(frozen=True)
+class LegalCandidate:
+    """向量召回后的候选法条，后续可进入 reranker 重排。"""
+
+    entry: LegalVectorEntry
+    vector_score: float
+    final_score: float
+    rerank_score: float = 0.0
+    reranker_model: str = ""
 
 
 LEGAL_KNOWLEDGE_BASE: tuple[LegalArticle, ...] = (
@@ -98,8 +122,19 @@ _VECTOR_INDEX: list[LegalVectorEntry] | None = None
 _VECTOR_INDEX_MODEL = ""
 
 
-def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limit: int = 5) -> list[LegalReference]:
-    """根据工单文本对法律知识库进行向量检索。"""
+def get_legal_retrieval_config_status() -> dict[str, object]:
+    """返回法律条款混合检索配置，便于在接口中排查阈值和 Top K。"""
+
+    return {
+        "vector_top_k": LEGAL_VECTOR_TOP_K,
+        "display_top_k": LEGAL_DISPLAY_TOP_K,
+        "min_relevance_score": LEGAL_MIN_RELEVANCE_SCORE,
+        "enable_reranker": LEGAL_ENABLE_RERANKER,
+    }
+
+
+def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limit: int | None = None) -> list[LegalReference]:
+    """对法律知识库执行向量召回、reranker 重排和阈值过滤。"""
 
     query_text = (
         f"{ticket.title}\n{ticket.content}\n{ticket.ticket_type}\n{ticket.appeal_purpose}\n"
@@ -111,23 +146,64 @@ def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limi
         (entry, cosine_similarity(query_vector, entry.vector))
         for entry in _get_vector_index(query_model)
     ]
+    vector_candidates = [
+        LegalCandidate(entry=entry, vector_score=score, final_score=score)
+        for entry, score in sorted(scored, key=lambda item: item[1], reverse=True)[:LEGAL_VECTOR_TOP_K]
+        if score > 0
+    ]
+    candidates = _rerank_candidates(query_text, vector_candidates)
     references = []
-    for entry, score in sorted(scored, key=lambda item: item[1], reverse=True)[:limit]:
-        if score <= 0:
+    display_limit = limit or LEGAL_DISPLAY_TOP_K
+    for candidate in sorted(candidates, key=lambda item: item.final_score, reverse=True):
+        if candidate.final_score < LEGAL_MIN_RELEVANCE_SCORE:
             continue
+        entry = candidate.entry
         references.append(
             LegalReference(
                 law_name=entry.article.law_name,
                 article=entry.article.article,
                 excerpt=entry.article.excerpt,
-                relevance_score=round(score, 2),
-                reason=entry.article.reason_template,
-                retrieval_method="vector",
+                relevance_score=round(candidate.final_score, 2),
+                reason=_build_reference_reason(entry.article, candidate),
+                retrieval_method="hybrid_vector_rerank" if candidate.rerank_score > 0 else "vector",
                 embedding_model=entry.embedding_model,
+                reranker_model=candidate.reranker_model,
+                vector_score=round(candidate.vector_score, 2),
+                rerank_score=round(candidate.rerank_score, 2),
                 source_id=entry.article.source_id,
             )
         )
+        if len(references) >= display_limit:
+            break
     return references
+
+
+def _rerank_candidates(query_text: str, candidates: list[LegalCandidate]) -> list[LegalCandidate]:
+    """使用 reranker 对向量召回候选法条重排；未配置或失败时保留向量排序。"""
+
+    if not LEGAL_ENABLE_RERANKER or not candidates:
+        return candidates
+    documents = [_article_to_rerank_text(candidate.entry.article) for candidate in candidates]
+    reranked = rerank_documents(query_text, documents, top_n=min(len(candidates), LEGAL_DISPLAY_TOP_K))
+    if not reranked:
+        return candidates
+
+    candidate_by_index = {index: candidate for index, candidate in enumerate(candidates)}
+    updated = []
+    for item in reranked:
+        candidate = candidate_by_index.get(item.index)
+        if candidate is None:
+            continue
+        updated.append(
+            LegalCandidate(
+                entry=candidate.entry,
+                vector_score=candidate.vector_score,
+                final_score=item.score,
+                rerank_score=item.score,
+                reranker_model=RERANKER_MODEL,
+            )
+        )
+    return updated or candidates
 
 
 def _get_vector_index(expected_model: str) -> list[LegalVectorEntry]:
@@ -149,3 +225,17 @@ def _article_to_embedding_text(article: LegalArticle) -> str:
     """把法条元数据合并成用于入库的 embedding 文本。"""
 
     return f"{article.law_name}\n{article.article}\n{article.excerpt}\n{article.retrieval_text}"
+
+
+def _article_to_rerank_text(article: LegalArticle) -> str:
+    """把法条整理为 reranker 可比较的候选文本。"""
+
+    return f"{article.law_name} {article.article}\n{article.excerpt}\n{article.retrieval_text}"
+
+
+def _build_reference_reason(article: LegalArticle, candidate: LegalCandidate) -> str:
+    """生成工作人员可读的法条推荐原因。"""
+
+    if candidate.rerank_score > 0:
+        return f"{article.reason_template}已经过 reranker 重排确认。"
+    return article.reason_template
