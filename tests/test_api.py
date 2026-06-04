@@ -65,6 +65,7 @@ def test_process_one_classifies_complaint():
     assert response.status_code == 200
     assert body["structured"]["case_nature"] == "投诉"
     assert body["status"] == "待流转"
+    assert body["recommended_branch"] == "北京市朝阳区市场监督管理部门建国路承办单位"
     assert body["actions"][0]["tool"] == "transfer_ticket"
 
 
@@ -234,15 +235,15 @@ def test_ambiguous_ticket_can_be_unknown_case_nature():
     assert "人工复核" in body["return_reason"]
 
 
-def test_unknown_region_cannot_recommend_branch():
-    """未知辖区样例：所属区域不在示例城市映射内时，不能推荐具体承办单位。"""
+def test_non_national_region_cannot_recommend_branch():
+    """全国不同地区样例：当前 demo 只处理北京市朝阳区工单，不能推荐建议承办单位。"""
 
     response = client.post("/tickets/DEMO-TICKET-008/process")
     body = response.json()
 
     assert response.status_code == 200
     assert body["recommended_branch"] == ""
-    assert body["jurisdiction"] == "非本市或未知辖区"
+    assert body["jurisdiction"] == "市场监管职责范围"
     assert body["status"] == "建议退单"
 
 

@@ -4,7 +4,7 @@ from app.models import Ticket
 
 
 MOCK_TICKETS: list[Ticket] = [
-    # 完整投诉样例：核心字段齐全，通常可推荐流转至北京市朝阳区市场监管局。
+    # 完整投诉样例：南大街命中建国路承办单位。
     Ticket(
         title="要求部门协调按消协规定赔偿。",
         content=(
@@ -24,11 +24,11 @@ MOCK_TICKETS: list[Ticket] = [
         third_party_ticket_no="DEMO-THIRD-PARTY-001",
         attachments=["订单截图.jpg", "商品宣传页.jpg"],
     ),
-    # 完整举报样例：强调违法线索和依法查处，通常归为举报并流转通州区。
+    # 完整举报样例：强调违法线索和依法查处，世纪大道街道命中世纪大道承办单位。
     Ticket(
         title="举报某便利店销售过期食品",
         content=(
-            "本人在北京市通州区金沙街道建设路某便利店购买酸奶，回家后发现已经超过保质期。"
+            "本人在北京市北京市朝阳区世纪大道街道和丰大厦附近某便利店购买酸奶，回家后发现已经超过保质期。"
             "店内货架还有多瓶同批次过期食品，要求市场监管部门依法查处并反馈处理结果。"
         ),
         ticket_no="DEMO-TICKET-002",
@@ -37,9 +37,9 @@ MOCK_TICKETS: list[Ticket] = [
         customer_name="张某",
         created_at="2026-05-29 09:00:12",
         due_at="2026-06-12 18:00:00",
-        region="通州区",
+        region="北京市朝阳区",
         incident_at="2026-05-28 20:10:00",
-        incident_address="北京市通州区金沙街道建设路18号",
+        incident_address="北京市北京市朝阳区世纪大道街道和丰大厦附近",
         appeal_purpose="依法查处",
         attachments=["购物小票.jpg"],
     ),
@@ -47,7 +47,7 @@ MOCK_TICKETS: list[Ticket] = [
     Ticket(
         title="投诉餐饮店拒绝退款且态度恶劣",
         content=(
-            "在海门区海门街道人民路某餐饮店充值会员卡500元，商家停业后无法消费，"
+            "在北京市朝阳区体育西路街道青年西路某餐饮店充值会员卡500元，商家停业后无法消费，"
             "联系负责人一直拖延退款。本人非常生气，多次沟通无果，要求尽快退还余额。"
         ),
         ticket_no="DEMO-TICKET-003",
@@ -56,8 +56,8 @@ MOCK_TICKETS: list[Ticket] = [
         customer_name="李女士",
         created_at="2026-05-29 15:30:00",
         due_at="2026-06-13 18:00:00",
-        region="海门区",
-        incident_address="北京市海门区海门街道人民路66号",
+        region="北京市朝阳区",
+        incident_address="北京市北京市朝阳区体育西路街道青年西路109号附近",
         appeal_purpose="退款",
     ),
     # 明显非市场监管职责样例：夜间施工噪音通常建议退单或转其他部门。
@@ -79,7 +79,7 @@ MOCK_TICKETS: list[Ticket] = [
     Ticket(
         title="举报网店标签违法并要求十倍赔偿",
         content=(
-            "本人近期已多次购买不同店铺食品进行维权。本次在如皋市某食品网店购买糕点，"
+            "本人近期已多次购买不同店铺食品进行维权。本次在北京市朝阳区某食品网店购买糕点，"
             "发现标签配料表不规范，依据食品安全法第一百四十八条要求十倍赔偿，"
             "如不处理将继续投诉举报。"
         ),
@@ -89,9 +89,9 @@ MOCK_TICKETS: list[Ticket] = [
         #customer_name="赵某",
         created_at="2026-05-30 11:00:00",
         due_at="2026-06-14 18:00:00",
-        region="如皋市",
+        region="北京市朝阳区",
         incident_at="2026-05-27 10:00:00",
-        #incident_address="北京市如皋市如城街道中山路100号",
+        #incident_address="北京市北京市朝阳区某食品网店",
         appeal_purpose="十倍赔偿并依法查处",
         appeal_count=18,
         attachments=["商品标签.jpg", "订单截图.jpg"],
@@ -124,7 +124,7 @@ MOCK_TICKETS: list[Ticket] = [
         incident_address="北京市北京市朝阳区",
         appeal_purpose="咨询解释",
     ),
-    # 未知辖区样例：属于消费纠纷但 region 不在示例城市下属区县映射中，无法推荐具体承办单位。
+    # 全国不同地区样例：属于消费纠纷但不在本 demo 当前处理范围内。
     Ticket(
         title="投诉异地商家拒绝退款",
         content="消费者在外地某商场购买电器后发现质量问题，商家拒绝退货退款，要求协调处理。",
@@ -149,7 +149,7 @@ MOCK_TICKETS: list[Ticket] = [
         customer_name="匿名",
         created_at="2026-06-01 14:00:00",
         due_at="2026-06-16 18:00:00",
-        region="如东县",
+        region="北京市朝阳区",
         appeal_purpose="查处",
     ),
     # 职责边界样例：涉及物业收费，通常不属于市场监管主责，适合演示建议退单。

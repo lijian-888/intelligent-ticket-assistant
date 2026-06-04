@@ -35,7 +35,7 @@ from app.llm_schemas import (
 from app.legal_kb import retrieve_legal_references
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketState, TicketStatus
 from app.rules import (
-    BRANCH_BY_REGION,
+    NATIONAL_REGION_RULES,
     MARKET_REGULATION_KEYWORDS,
     NON_MARKET_REGULATION_HINTS,
     RECOMMENDED_FIELDS,
@@ -440,7 +440,8 @@ def judge_jurisdiction(state: TicketState) -> TicketState:
     """LangGraph 节点：判断是否属于市场监管职责范围，必要时给出退单原因。"""
 
     ticket = state["ticket"]
-    text = f"{ticket.title} {ticket.content} {ticket.ticket_type}"
+    structured = state["structured"]
+    text = f"{ticket.title} {ticket.content} {ticket.ticket_type} {structured.incident_address} {structured.region}"
 
     for hint, reason in NON_MARKET_REGULATION_HINTS.items():
         if hint in text:
@@ -452,24 +453,52 @@ def judge_jurisdiction(state: TicketState) -> TicketState:
             "return_reason": "未识别到明确市场监管职责关键词，建议人工复核是否应退单或转办。",
         }
 
-    if ticket.region and ticket.region not in BRANCH_BY_REGION:
+    if _is_definitely_non_national_ticket(ticket, structured):
         return {
-            "jurisdiction": "非本市或未知辖区",
-            "return_reason": f"所属区域“{ticket.region}”未匹配到北京市属地承办单位。",
+            "jurisdiction": "市场监管职责范围",
+            "return_reason": "",
         }
 
     return {"jurisdiction": "市场监管职责范围", "return_reason": ""}
 
 
 def recommend_branch(state: TicketState) -> TicketState:
-    """LangGraph 节点：根据所属区域推荐应流转的县区市场监管承办单位。"""
+    """LangGraph 节点：根据北京市朝阳区事发地址推荐应流转的承办单位。"""
 
+    ticket = state["ticket"]
     structured = state["structured"]
-    branch = BRANCH_BY_REGION.get(structured.region, "")
+    text = f"{structured.incident_address} {ticket.content} {ticket.title}"
+    branch = ""
+    matched_keyword = ""
+    for branch_name, keywords in NATIONAL_REGION_RULES:
+        matched_keyword = next((keyword for keyword in keywords if keyword in text), "")
+        if matched_keyword:
+            branch = branch_name
+            break
     reason = ""
     if branch:
-        reason = f"根据所属区域/事发地址中的“{structured.region}”匹配属地承办单位。"
+        reason = f"根据事发地址或正文中的“{matched_keyword}”匹配北京市朝阳区承办单位。"
     return {"recommended_branch": branch, "transfer_reason": reason}
+
+
+def _is_definitely_non_national_ticket(ticket: Ticket, structured: StructuredTicket) -> bool:
+    """仅在工单明确指向非北京市朝阳区时返回 True；区域缺失时交由补充流程处理。"""
+
+    text = f"{ticket.region} {structured.region} {ticket.incident_address} {structured.incident_address} {ticket.content}"
+    if "北京市朝阳区" in text:
+        return False
+    non_national_hints = [
+        "通州区",
+        "海门区",
+        "启东市",
+        "如皋市",
+        "海安市",
+        "如东县",
+        "西安市",
+        "雁塔区",
+        "外地",
+    ]
+    return any(hint in text for hint in non_national_hints)
 
 
 def analyze_emotion(state: TicketState) -> TicketState:
