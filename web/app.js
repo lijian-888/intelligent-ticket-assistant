@@ -3,6 +3,7 @@ const state = {
   results: new Map(),
   loading: new Set(),
 };
+const AI_RESULT_CACHE_VERSION = "20260604-reranker-v1";
 
 const els = {
   rows: document.getElementById("ticketRows"),
@@ -14,6 +15,10 @@ const els = {
 
 function loadCachedResults() {
   try {
+    if (sessionStorage.getItem("aiResultsVersion") !== AI_RESULT_CACHE_VERSION) {
+      sessionStorage.removeItem("aiResults");
+      sessionStorage.setItem("aiResultsVersion", AI_RESULT_CACHE_VERSION);
+    }
     const cached = JSON.parse(sessionStorage.getItem("aiResults") || "{}");
     state.results = new Map(Object.entries(cached));
   } catch (_) {
@@ -22,6 +27,7 @@ function loadCachedResults() {
 }
 
 function saveCachedResults() {
+  sessionStorage.setItem("aiResultsVersion", AI_RESULT_CACHE_VERSION);
   sessionStorage.setItem("aiResults", JSON.stringify(Object.fromEntries(state.results)));
 }
 

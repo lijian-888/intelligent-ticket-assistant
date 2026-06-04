@@ -14,9 +14,14 @@ const els = {
 
 let ticket = null;
 let result = null;
+const AI_RESULT_CACHE_VERSION = "20260604-reranker-v1";
 
 function loadCachedResult() {
   try {
+    if (sessionStorage.getItem("aiResultsVersion") !== AI_RESULT_CACHE_VERSION) {
+      sessionStorage.removeItem("aiResults");
+      sessionStorage.setItem("aiResultsVersion", AI_RESULT_CACHE_VERSION);
+    }
     const cached = JSON.parse(sessionStorage.getItem("aiResults") || "{}");
     return ticketNo ? cached[ticketNo] : null;
   } catch (_) {
@@ -27,6 +32,7 @@ function loadCachedResult() {
 function saveCachedResult(value) {
   const cached = JSON.parse(sessionStorage.getItem("aiResults") || "{}");
   cached[value.ticket_no] = value;
+  sessionStorage.setItem("aiResultsVersion", AI_RESULT_CACHE_VERSION);
   sessionStorage.setItem("aiResults", JSON.stringify(cached));
 }
 
@@ -100,6 +106,7 @@ async function detectTicket() {
 function saveCachedResultPlaceholder(ticketNoValue) {
   const cached = JSON.parse(sessionStorage.getItem("aiResults") || "{}");
   delete cached[ticketNoValue];
+  sessionStorage.setItem("aiResultsVersion", AI_RESULT_CACHE_VERSION);
   sessionStorage.setItem("aiResults", JSON.stringify(cached));
 }
 
