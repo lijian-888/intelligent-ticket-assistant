@@ -24,6 +24,7 @@ class LegalVectorEntry:
 
     article: LegalArticle
     vector: list[float]
+    embedding_model: str
 
 
 LEGAL_KNOWLEDGE_BASE: tuple[LegalArticle, ...] = (
@@ -94,6 +95,7 @@ LEGAL_KNOWLEDGE_BASE: tuple[LegalArticle, ...] = (
 )
 
 _VECTOR_INDEX: list[LegalVectorEntry] | None = None
+_VECTOR_INDEX_MODEL = ""
 
 
 def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limit: int = 5) -> list[LegalReference]:
@@ -104,9 +106,10 @@ def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limi
         f"{structured.case_nature.value}\n{structured.appeal}\n{' '.join(structured.keywords)}"
     )
     query_vector = embed_texts([query_text])[0]
+    query_model = get_embedding_runtime_model()
     scored = [
         (entry, cosine_similarity(query_vector, entry.vector))
-        for entry in _get_vector_index()
+        for entry in _get_vector_index(query_model)
     ]
     references = []
     for entry, score in sorted(scored, key=lambda item: item[1], reverse=True)[:limit]:
@@ -120,23 +123,25 @@ def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limi
                 relevance_score=round(score, 2),
                 reason=entry.article.reason_template,
                 retrieval_method="vector",
-                embedding_model=get_embedding_runtime_model(),
+                embedding_model=entry.embedding_model,
                 source_id=entry.article.source_id,
             )
         )
     return references
 
 
-def _get_vector_index() -> list[LegalVectorEntry]:
-    """构建并缓存 mock 法律知识库向量索引。"""
+def _get_vector_index(expected_model: str) -> list[LegalVectorEntry]:
+    """构建并缓存 mock 法律知识库向量索引；模型变化时自动重建。"""
 
-    global _VECTOR_INDEX
-    if _VECTOR_INDEX is None:
+    global _VECTOR_INDEX, _VECTOR_INDEX_MODEL
+    if _VECTOR_INDEX is None or _VECTOR_INDEX_MODEL != expected_model:
         vectors = embed_texts([_article_to_embedding_text(article) for article in LEGAL_KNOWLEDGE_BASE])
+        index_model = get_embedding_runtime_model()
         _VECTOR_INDEX = [
-            LegalVectorEntry(article=article, vector=vector)
+            LegalVectorEntry(article=article, vector=vector, embedding_model=index_model)
             for article, vector in zip(LEGAL_KNOWLEDGE_BASE, vectors)
         ]
+        _VECTOR_INDEX_MODEL = index_model
     return _VECTOR_INDEX
 
 
