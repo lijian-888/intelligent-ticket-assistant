@@ -95,21 +95,33 @@ def create_app() -> FastAPI:
     def process_one(ticket_no: str) -> ProcessingResult:
         """处理指定工单，并返回结构化、分派、风险和动作建议。"""
 
+        logger.info("[api timing] process start ticket=%s", ticket_no)
+        started = perf_counter()
         try:
             ticket = get_mock_ticket(ticket_no)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="工单不存在") from exc
-        return process_ticket(ticket)
+        try:
+            return process_ticket(ticket)
+        finally:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            logger.info("[api timing] process end ticket=%s duration_ms=%s", ticket_no, duration_ms)
 
     @app.post("/tickets/{ticket_no}/smart-transfer", response_model=ProcessingResult)
     def smart_transfer_one(ticket_no: str) -> ProcessingResult:
         """智能流转指定工单：高置信度自动执行，低置信度只返回推荐动作。"""
 
+        logger.info("[api timing] smart_transfer start ticket=%s", ticket_no)
+        started = perf_counter()
         try:
             ticket = get_mock_ticket(ticket_no)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="工单不存在") from exc
-        return smart_transfer_ticket(ticket)
+        try:
+            return smart_transfer_ticket(ticket)
+        finally:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            logger.info("[api timing] smart_transfer end ticket=%s duration_ms=%s", ticket_no, duration_ms)
 
     @app.post("/tickets/{ticket_no}/process/steps")
     def process_one_steps(ticket_no: str) -> list[dict[str, Any]]:
