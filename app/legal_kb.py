@@ -17,6 +17,7 @@ LEGAL_VECTOR_TOP_K = int(os.getenv("LEGAL_VECTOR_TOP_K", "10"))
 LEGAL_DISPLAY_TOP_K = int(os.getenv("LEGAL_DISPLAY_TOP_K", "3"))
 LEGAL_MIN_RELEVANCE_SCORE = float(os.getenv("LEGAL_MIN_RELEVANCE_SCORE", "0.55"))
 LEGAL_ENABLE_RERANKER = os.getenv("LEGAL_ENABLE_RERANKER", "true").lower() == "true"
+LEGAL_PREWARM_ON_STARTUP = os.getenv("LEGAL_PREWARM_ON_STARTUP", "true").lower() == "true"
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,23 @@ def get_legal_retrieval_config_status() -> dict[str, object]:
         "display_top_k": LEGAL_DISPLAY_TOP_K,
         "min_relevance_score": LEGAL_MIN_RELEVANCE_SCORE,
         "enable_reranker": LEGAL_ENABLE_RERANKER,
+        "prewarm_on_startup": LEGAL_PREWARM_ON_STARTUP,
+    }
+
+
+def prewarm_legal_vector_index() -> dict[str, object]:
+    """服务启动时预热法律知识库向量索引，避免首个工单承担建库耗时。"""
+
+    if not LEGAL_PREWARM_ON_STARTUP:
+        return {"enabled": False, "message": "LEGAL_PREWARM_ON_STARTUP=false，跳过预热。"}
+    warmup_vector = embed_texts(["法律知识库向量索引预热"])[0]
+    model = get_embedding_runtime_model()
+    index = _get_vector_index(model)
+    return {
+        "enabled": True,
+        "embedding_model": model,
+        "warmup_dimension": len(warmup_vector),
+        "article_count": len(index),
     }
 
 

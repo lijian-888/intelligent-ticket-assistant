@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -10,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.db import get_db_status, init_db
 from app.embedding_client import get_embedding_config_status
 from app.graph import process_ticket, process_ticket_steps
-from app.legal_kb import get_legal_retrieval_config_status
+from app.legal_kb import get_legal_retrieval_config_status, prewarm_legal_vector_index
 from app.llm_client import get_llm_config_status, ping_llm
 from app.mock_data import MOCK_TICKETS
 from app.models import ProcessingResult, SupplementTask, Ticket
@@ -28,9 +29,20 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def startup() -> None:
-        """启动时初始化 demo 数据库。"""
+        """启动时初始化 demo 数据库，并预热法律知识库向量索引。"""
 
         init_db()
+        started = perf_counter()
+        try:
+            result = prewarm_legal_vector_index()
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            print(f"[startup] legal_vector_prewarm duration_ms={duration_ms} result={result}", flush=True)
+        except Exception as exc:
+            duration_ms = round((perf_counter() - started) * 1000, 2)
+            print(
+                f"[startup] legal_vector_prewarm failed duration_ms={duration_ms} error={type(exc).__name__}: {exc}",
+                flush=True,
+            )
 
     @app.get("/")
     def root() -> dict[str, Any]:
