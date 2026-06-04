@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -19,6 +20,8 @@ from app.reranker_client import get_reranker_config_status
 from app.smart_transfer import smart_transfer_ticket
 from app.supplement import create_or_update_supplement_task, list_saved_supplement_tasks
 
+logger = logging.getLogger("uvicorn.error")
+
 
 def create_app() -> FastAPI:
     """创建 FastAPI 应用并注册 demo 接口。"""
@@ -36,12 +39,14 @@ def create_app() -> FastAPI:
         try:
             result = prewarm_legal_vector_index()
             duration_ms = round((perf_counter() - started) * 1000, 2)
-            print(f"[startup] legal_vector_prewarm duration_ms={duration_ms} result={result}", flush=True)
+            logger.info("[startup] legal_vector_prewarm duration_ms=%s result=%s", duration_ms, result)
         except Exception as exc:
             duration_ms = round((perf_counter() - started) * 1000, 2)
-            print(
-                f"[startup] legal_vector_prewarm failed duration_ms={duration_ms} error={type(exc).__name__}: {exc}",
-                flush=True,
+            logger.warning(
+                "[startup] legal_vector_prewarm failed duration_ms=%s error=%s: %s",
+                duration_ms,
+                type(exc).__name__,
+                exc,
             )
 
     @app.get("/")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from time import perf_counter
 from typing import Any
 
@@ -22,6 +23,8 @@ from app.nodes import (
     validate_completeness,
 )
 
+logger = logging.getLogger("uvicorn.error")
+
 
 def timed_node(node_name: str, node_fn):
     """包装 LangGraph 节点，向控制台输出每个节点的耗时。"""
@@ -34,9 +37,11 @@ def timed_node(node_name: str, node_fn):
             return node_fn(state)
         finally:
             duration_ms = round((perf_counter() - started) * 1000, 2)
-            print(
-                f"[graph node timing] ticket={ticket_no} node={node_name} duration_ms={duration_ms}",
-                flush=True,
+            logger.info(
+                "[graph node timing] ticket=%s node=%s duration_ms=%s",
+                ticket_no,
+                node_name,
+                duration_ms,
             )
 
     return wrapped
@@ -109,7 +114,7 @@ def process_ticket(ticket: Ticket) -> ProcessingResult:
         return final_state["result"]
     finally:
         duration_ms = round((perf_counter() - started) * 1000, 2)
-        print(f"[graph total timing] ticket={ticket.ticket_no} duration_ms={duration_ms}", flush=True)
+        logger.info("[graph total timing] ticket=%s duration_ms=%s", ticket.ticket_no, duration_ms)
 
 
 def process_ticket_steps(ticket: Ticket) -> list[dict[str, Any]]:
