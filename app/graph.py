@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from threading import Lock
 from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from fastapi.encoders import jsonable_encoder
 from langgraph.graph import END, StateGraph
@@ -24,6 +26,8 @@ from app.nodes import (
 )
 
 logger = logging.getLogger("uvicorn.error")
+_TIMING_LOCK = Lock()
+_RUN_NODE_TIMINGS: dict[str, dict[str, float]] = {}
 
 
 def timed_node(node_name: str, node_fn):
@@ -37,6 +41,9 @@ def timed_node(node_name: str, node_fn):
             return node_fn(state)
         finally:
             duration_ms = round((perf_counter() - started) * 1000, 2)
+            run_id = state.get("run_id")
+            if run_id:
+                _record_node_timing(run_id, node_name, duration_ms)
             logger.info(
                 "[graph node timing] ticket=%s node=%s duration_ms=%s",
                 ticket_no,
@@ -45,6 +52,27 @@ def timed_node(node_name: str, node_fn):
             )
 
     return wrapped
+
+
+def _record_node_timing(run_id: str, node_name: str, duration_ms: float) -> None:
+    """记录单次 process/steps 调用中的节点耗时。"""
+
+    with _TIMING_LOCK:
+        _RUN_NODE_TIMINGS.setdefault(run_id, {})[node_name] = duration_ms
+
+
+def _get_node_timing(run_id: str, node_name: str) -> float | None:
+    """读取单次 process/steps 调用中的节点耗时。"""
+
+    with _TIMING_LOCK:
+        return _RUN_NODE_TIMINGS.get(run_id, {}).get(node_name)
+
+
+def _clear_run_timings(run_id: str) -> None:
+    """清理单次 process/steps 调用的临时耗时记录。"""
+
+    with _TIMING_LOCK:
+        _RUN_NODE_TIMINGS.pop(run_id, None)
 
 
 def parallel_join(state: TicketState) -> TicketState:
@@ -121,14 +149,26 @@ def process_ticket_steps(ticket: Ticket) -> list[dict[str, Any]]:
     """按 LangGraph 节点顺序返回单条工单的中间处理过程。"""
 
     steps: list[dict[str, Any]] = []
-    for event in ticket_graph.stream({"ticket": ticket}, stream_mode="updates"):
-        for node_name, output in event.items():
-            steps.append(
-                {
-
-
-                    "node": node_name,
-                    "output": jsonable_encoder(output),
-                }
-            )
-    return steps
+    started = perf_counter()
+    run_id = uuid4().hex
+    try:
+        for event in ticket_graph.stream({"ticket": ticket, "run_id": run_id}, stream_mode="updates"):
+            for node_name, output in event.items():
+                output_data = dict(output or {})
+                steps.append(
+                    {
+                        "node": node_name,
+                        "duration_ms": _get_node_timing(run_id, node_name),
+                        "output": jsonable_encoder(output_data),
+                    }
+                )
+        steps.append(
+            {
+                "node": "__total__",
+                "duration_ms": round((perf_counter() - started) * 1000, 2),
+                "output": {},
+            }
+        )
+        return steps
+    finally:
+        _clear_run_timings(run_id)

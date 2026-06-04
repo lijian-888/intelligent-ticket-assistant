@@ -283,6 +283,9 @@ def test_process_steps_returns_langgraph_nodes():
     assert "infer_missing_required_fields" in nodes
     assert "decide_action" in nodes
     assert "build_result" in nodes
+    assert body[-1]["node"] == "__total__"
+    assert body[-1]["duration_ms"] >= 0
+    assert any(item["node"] == "structure_ticket" and item["duration_ms"] is not None for item in body)
 
 
 def test_incomplete_ticket_reports_missing_fields():

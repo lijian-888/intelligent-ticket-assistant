@@ -142,6 +142,7 @@ class SupplementTask(BaseModel):
 class TicketState(TypedDict, total=False):
     """LangGraph 节点之间传递的状态对象，每个节点只补充自己负责的字段。"""
 
+    run_id: str
     ticket: Ticket
     structured: StructuredTicket
     inferred_required_fields: dict[str, Any]
