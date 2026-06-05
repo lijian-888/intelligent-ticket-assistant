@@ -15,6 +15,7 @@ from zipfile import ZipFile
 
 ARTICLE_PATTERN = re.compile(r"^第[一二三四五六七八九十百千万零〇两]+条")
 CHAPTER_PATTERN = re.compile(r"^第[一二三四五六七八九十百千万零〇两]+章")
+LAW_TITLE_PATTERN = re.compile(r"^中华人民共和国.+(?:法|条例|规定|办法|决定)$")
 
 
 @dataclass(frozen=True)
@@ -137,7 +138,7 @@ def _read_doc_paragraphs(path: Path) -> list[str]:
 
 
 def _read_pdf_paragraphs(path: Path) -> list[str]:
-    """读取文本型 PDF 段落；不处理扫描图片 PDF。"""
+    """读取文本型 PDF，并把碎行重组成接近 docx 的法规段落。"""
 
     try:
         from pypdf import PdfReader
@@ -150,12 +151,160 @@ def _read_pdf_paragraphs(path: Path) -> list[str]:
     for page in reader.pages:
         text = page.extract_text() or ""
         for line in text.splitlines():
-            normalized = line.strip()
+            normalized = _normalize_pdf_line(line)
             if normalized:
                 paragraphs.append(normalized)
     if not paragraphs:
         raise ValueError(f"PDF 未提取到文本内容：{path}")
+    return _rebuild_pdf_paragraphs(paragraphs)
+
+
+def _normalize_pdf_line(line: str) -> str:
+    """清理 PDF 抽取行中的异常空格和全角空白。"""
+
+    text = line.strip().replace("\u3000", "")
+    if _contains_cjk(text):
+        text = re.sub(r"\s+", "", text)
+    else:
+        text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _rebuild_pdf_paragraphs(lines: list[str]) -> list[str]:
+    """把 PDF 的碎行重组为标题、目录、章节和条文段落。"""
+
+    title_index = _find_pdf_law_title_index(lines)
+    paragraphs = [lines[title_index]]
+    index = title_index + 1
+
+    while index < len(lines):
+        line = lines[index]
+        if line in {"《", "》"}:
+            index += 1
+            continue
+        if line == "目" and index + 1 < len(lines) and lines[index + 1] == "录":
+            paragraphs.append("目录")
+            index += 2
+            continue
+        if line == "目录":
+            paragraphs.append(line)
+            index += 1
+            continue
+        if line == "（":
+            revision, index = _collect_parenthesized_pdf_text(lines, index)
+            if revision:
+                paragraphs.append(revision)
+            continue
+        if CHAPTER_PATTERN.match(line):
+            chapter, index = _collect_pdf_chapter(lines, index)
+            paragraphs.append(chapter)
+            continue
+        if ARTICLE_PATTERN.match(line):
+            article, index = _collect_pdf_article(lines, index)
+            paragraphs.append(article)
+            continue
+        if _should_keep_pdf_standalone_line(line):
+            paragraphs.append(line)
+        index += 1
+
     return paragraphs
+
+
+def _find_pdf_law_title_index(lines: list[str]) -> int:
+    """优先定位 PDF 正文中的法规名称，避免把“主席令”当作法律名称。"""
+
+    matches = []
+    for index, line in enumerate(lines):
+        if LAW_TITLE_PATTERN.match(line) and "主席令" not in line:
+            if index > 0 and lines[index - 1] == "《":
+                continue
+            matches.append(index)
+            if "（" in lines[index + 1 : index + 4]:
+                return index
+    return matches[-1] if matches else 0
+
+
+def _collect_parenthesized_pdf_text(lines: list[str], start: int) -> tuple[str, int]:
+    """合并 PDF 中被拆开的括号说明，例如修订说明。"""
+
+    parts = []
+    index = start
+    while index < len(lines):
+        parts.append(lines[index])
+        if lines[index] == "）":
+            index += 1
+            break
+        index += 1
+    text = "".join(parts)
+    return text, index
+
+
+def _collect_pdf_chapter(lines: list[str], start: int) -> tuple[str, int]:
+    """合并被拆开的章节标题，例如“第一章”“总”“则”。"""
+
+    chapter = lines[start]
+    title_parts = []
+    index = start + 1
+    while index < len(lines):
+        line = lines[index]
+        if _is_pdf_block_boundary(line):
+            break
+        if len(line) <= 8 and not _is_punctuation_only(line):
+            title_parts.append(line)
+            index += 1
+            continue
+        break
+    if title_parts:
+        chapter = f"{chapter}　{''.join(title_parts)}"
+    return chapter, index
+
+
+def _collect_pdf_article(lines: list[str], start: int) -> tuple[str, int]:
+    """合并“第几条”后的正文碎行，形成完整条文段落。"""
+
+    article = lines[start]
+    body_lines = []
+    index = start + 1
+    while index < len(lines):
+        line = lines[index]
+        if ARTICLE_PATTERN.match(line) or CHAPTER_PATTERN.match(line):
+            break
+        body_lines.append(line)
+        index += 1
+    body = "".join(body_lines).strip()
+    return (f"{article}　{body}" if body else article), index
+
+
+def _should_keep_pdf_standalone_line(line: str) -> bool:
+    """判断 PDF 中非条文行是否需要保留为独立段落。"""
+
+    if not line or line in {"《", "》", "目", "录"}:
+        return False
+    if _is_punctuation_only(line):
+        return False
+    return True
+
+
+def _is_pdf_block_boundary(line: str) -> bool:
+    """判断 PDF 行是否意味着章节标题收集结束。"""
+
+    return (
+        line in {"目录", "目", "录", "（", "《", "》"}
+        or ARTICLE_PATTERN.match(line) is not None
+        or CHAPTER_PATTERN.match(line) is not None
+    )
+
+
+def _is_punctuation_only(text: str) -> bool:
+    """判断文本是否只有标点。"""
+
+    return bool(text) and all(char in "，。；：、,.!?！？（）()《》" for char in text)
+
+
+def _contains_cjk(text: str) -> bool:
+    """判断文本是否包含中日韩字符或全角数字。"""
+
+    return any("\u3400" <= char <= "\u9fff" or "\uff10" <= char <= "\uff19" for char in text)
 
 
 def _find_libreoffice() -> str:

@@ -5,7 +5,7 @@ from zipfile import ZipFile
 from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
-from app.legal_docx_parser import parse_legal_document, parse_legal_docx
+from app.legal_docx_parser import _rebuild_pdf_paragraphs, parse_legal_document, parse_legal_docx
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
@@ -516,6 +516,49 @@ def test_parse_legal_pdf_extracts_text(tmp_path):
     assert document.law_name == "Test Law"
     assert document.chunks[0].article == "全文片段1"
     assert "Article one text" in document.chunks[0].chunk_text
+
+
+def test_rebuild_pdf_paragraphs_merges_split_legal_articles():
+    """PDF 碎行重组应合并孤立标点、章节标题和第几条正文。"""
+
+    paragraphs = _rebuild_pdf_paragraphs(
+        [
+            "中华人民共和国主席令",
+            "《",
+            "中华人民共和国黄河保护法",
+            "》",
+            "中华人民共和国黄河保护法",
+            "（",
+            "２０２２年１０月３０日通过",
+            "）",
+            "目",
+            "录",
+            "第一章",
+            "总",
+            "则",
+            "第一章",
+            "总",
+            "则",
+            "第一条",
+            "为了加强黄河流域生态环境保护",
+            "，",
+            "保障黄河安澜",
+            "，",
+            "制定本法",
+            "。",
+            "第二条",
+            "黄河流域相关活动",
+            "，",
+            "适用本法",
+            "。",
+        ]
+    )
+
+    assert paragraphs[0] == "中华人民共和国黄河保护法"
+    assert paragraphs[1] == "（２０２２年１０月３０日通过）"
+    assert "第一章　总则" in paragraphs
+    assert "第一条　为了加强黄河流域生态环境保护，保障黄河安澜，制定本法。" in paragraphs
+    assert "第二条　黄河流域相关活动，适用本法。" in paragraphs
 
 
 def test_parse_legal_doc_uses_conversion_route(monkeypatch, tmp_path):
