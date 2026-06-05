@@ -562,6 +562,13 @@ def test_rebuild_pdf_paragraphs_merges_split_legal_articles():
             "为了加强黄河流域生态环境保护",
             "，",
             "保障黄河安澜",
+            "—",
+            "７１４",
+            "—",
+            "全国人民代表大会常务委员会公报",
+            "２０２３",
+            "·",
+            "４",
             "，",
             "制定本法",
             "。",
@@ -577,6 +584,8 @@ def test_rebuild_pdf_paragraphs_merges_split_legal_articles():
     assert paragraphs[1] == "（２０２２年１０月３０日通过）"
     assert "第一章　总则" in paragraphs
     assert "第一条　为了加强黄河流域生态环境保护，保障黄河安澜，制定本法。" in paragraphs
+    assert not any("全国人民代表大会常务委员会公报" in paragraph for paragraph in paragraphs)
+    assert not any("７１４" in paragraph for paragraph in paragraphs)
     assert "第二条　黄河流域相关活动，适用本法。" in paragraphs
 
 

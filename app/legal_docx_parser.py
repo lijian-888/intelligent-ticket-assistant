@@ -156,7 +156,7 @@ def _read_pdf_paragraphs(path: Path) -> list[str]:
                 paragraphs.append(normalized)
     if not paragraphs:
         raise ValueError(f"PDF 未提取到文本内容：{path}")
-    return _rebuild_pdf_paragraphs(paragraphs)
+    return _rebuild_pdf_paragraphs(_remove_pdf_noise_lines(paragraphs))
 
 
 def _normalize_pdf_line(line: str) -> str:
@@ -208,6 +208,26 @@ def _rebuild_pdf_paragraphs(lines: list[str]) -> list[str]:
         index += 1
 
     return paragraphs
+
+
+def _remove_pdf_noise_lines(lines: list[str]) -> list[str]:
+    """移除 PDF 页眉页脚噪声块，避免污染跨页条文。"""
+
+    cleaned = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _is_pdf_page_number_block(lines, index):
+            index += 3
+            continue
+        if _is_pdf_gazette_header(line):
+            index += 1
+            while index < len(lines) and _is_pdf_gazette_tail(lines[index]):
+                index += 1
+            continue
+        cleaned.append(line)
+        index += 1
+    return cleaned
 
 
 def _find_pdf_law_title_index(lines: list[str]) -> int:
@@ -271,7 +291,7 @@ def _collect_pdf_article(lines: list[str], start: int) -> tuple[str, int]:
             break
         body_lines.append(line)
         index += 1
-    body = "".join(body_lines).strip()
+    body = _remove_inline_pdf_noise("".join(body_lines)).strip()
     return (f"{article}　{body}" if body else article), index
 
 
@@ -298,7 +318,46 @@ def _is_pdf_block_boundary(line: str) -> bool:
 def _is_punctuation_only(text: str) -> bool:
     """判断文本是否只有标点。"""
 
-    return bool(text) and all(char in "，。；：、,.!?！？（）()《》" for char in text)
+    return bool(text) and all(char in "，。；：、,.!?！？（）()《》—－·" for char in text)
+
+
+def _is_pdf_page_number_block(lines: list[str], index: int) -> bool:
+    """识别形如“— 714 —”的 PDF 页码块。"""
+
+    if index + 2 >= len(lines):
+        return False
+    return (
+        lines[index] in {"—", "－", "-"}
+        and _is_pdf_number_line(lines[index + 1])
+        and lines[index + 2] in {"—", "－", "-"}
+    )
+
+
+def _is_pdf_gazette_header(line: str) -> bool:
+    """识别 PDF 页眉中的公报名称。"""
+
+    return "全国人民代表大会常务委员会公报" in line
+
+
+def _is_pdf_gazette_tail(line: str) -> bool:
+    """识别公报页眉后续的年份、点号、期号。"""
+
+    return _is_pdf_number_line(line) or line in {"·", ".", "•"}
+
+
+def _is_pdf_number_line(line: str) -> bool:
+    """判断是否为纯数字行，兼容全角数字。"""
+
+    normalized = line.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    return normalized.isdigit()
+
+
+def _remove_inline_pdf_noise(text: str) -> str:
+    """兜底移除已经拼入正文的 PDF 页码和公报页眉。"""
+
+    text = re.sub(r"[—－-]+[0-9０-９]+[—－-]+", "", text)
+    text = re.sub(r"全国人民代表大会常务委员会公报[0-9０-９]{4}[·.][0-9０-９]+", "", text)
+    return text
 
 
 def _contains_cjk(text: str) -> bool:
