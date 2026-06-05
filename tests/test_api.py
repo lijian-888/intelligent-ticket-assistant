@@ -5,7 +5,7 @@ from zipfile import ZipFile
 from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
-from app.legal_docx_parser import parse_legal_docx
+from app.legal_docx_parser import parse_legal_document, parse_legal_docx
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
@@ -461,6 +461,35 @@ def test_parse_legal_docx_falls_back_for_decision_documents(tmp_path):
     assert "投诉举报事项" in "\n".join(chunk.chunk_text for chunk in document.chunks)
 
 
+def test_parse_legal_pdf_extracts_text(tmp_path):
+    """文本型 PDF 应能提取正文并进入统一切分逻辑。"""
+
+    pdf_path = tmp_path / "测试法规.pdf"
+    _write_minimal_pdf(pdf_path, ["Test Law", "Article one text"])
+
+    document = parse_legal_document(pdf_path)
+
+    assert document.law_name == "Test Law"
+    assert document.chunks[0].article == "全文片段1"
+    assert "Article one text" in document.chunks[0].chunk_text
+
+
+def test_parse_legal_doc_uses_conversion_route(monkeypatch, tmp_path):
+    """旧版 doc 文件应走转换读取路径，转换后的段落进入统一切分逻辑。"""
+
+    doc_path = tmp_path / "测试法规.doc"
+    doc_path.write_bytes(b"fake doc binary")
+    monkeypatch.setattr(
+        "app.legal_docx_parser._read_doc_paragraphs",
+        lambda path: ["测试法规", "第一条　测试 doc 转换后的条文。"],
+    )
+
+    document = parse_legal_document(doc_path)
+
+    assert document.law_name == "测试法规"
+    assert document.chunks[0].article == "第一条"
+
+
 def test_embedding_remote_failure_falls_back_to_local_vector(monkeypatch):
     """bge-m3 服务异常时，向量生成应降级到本地 demo 向量，避免工单处理接口中断。"""
 
@@ -886,3 +915,39 @@ def _write_minimal_docx(path, paragraphs):
             "</Types>",
         )
         archive.writestr("word/document.xml", document_xml)
+
+
+def _write_minimal_pdf(path, lines):
+    """写入测试用最小文本 PDF，供 pypdf 提取纯文本。"""
+
+    commands = ["BT", "/F1 12 Tf", "72 720 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            commands.append("0 -18 Td")
+        commands.append(f"({line}) Tj")
+    commands.append("ET")
+    stream = "\n".join(commands).encode("ascii")
+    objects = [
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+        b"4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n",
+        b"5 0 obj\n<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n"
+        + stream + b"\nendstream\nendobj\n",
+    ]
+    content = b"%PDF-1.4\n"
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(content))
+        content += obj
+    xref_position = len(content)
+    content += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
+    content += b"0000000000 65535 f \n"
+    for offset in offsets[1:]:
+        content += f"{offset:010d} 00000 n \n".encode("ascii")
+    content += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_position}\n%%EOF\n"
+    ).encode("ascii")
+    path.write_bytes(content)

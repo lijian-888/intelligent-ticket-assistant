@@ -13,10 +13,10 @@ from app.legal_pg_kb import import_legal_docx_directory  # noqa: E402
 
 
 def main() -> None:
-    """命令行导入法规 docx 到 PostgreSQL + pgvector 知识库。"""
+    """命令行导入法规 docx、doc、pdf 到 PostgreSQL + pgvector 知识库。"""
 
-    parser = argparse.ArgumentParser(description="导入市场监管法律法规 docx 到真实知识库")
-    parser.add_argument("--path", default="legalDocx", help="法规 docx 目录，默认 legalDocx")
+    parser = argparse.ArgumentParser(description="导入市场监管法律法规文档到真实知识库")
+    parser.add_argument("--path", default="legalDocx", help="法规文档目录，默认 legalDocx")
     parser.add_argument("--rebuild", action="store_true", help="导入前清空原有法规知识库")
     args = parser.parse_args()
 

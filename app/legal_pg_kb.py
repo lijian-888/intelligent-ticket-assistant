@@ -94,13 +94,13 @@ def get_pg_legal_kb_status() -> dict[str, Any]:
 
 
 def import_legal_docx_directory(directory: Path, rebuild: bool = False) -> dict[str, Any]:
-    """解析目录中的法规 docx，生成向量后持久化到 PostgreSQL + pgvector。"""
+    """解析目录中的法规 docx、doc、pdf，生成向量后持久化到 PostgreSQL + pgvector。"""
 
     if not is_pg_legal_kb_configured():
         raise RuntimeError("未配置 LEGAL_DATABASE_URL，无法导入真实法律知识库。")
     documents = parse_legal_docx_directory(directory)
     if not documents:
-        return {"document_count": 0, "chunk_count": 0, "message": "未发现 docx 文件。"}
+        return {"document_count": 0, "chunk_count": 0, "message": "未发现 docx、doc 或 pdf 文件。"}
 
     all_chunks = [chunk for document in documents for chunk in document.chunks]
     sample_vector = embed_texts([all_chunks[0].chunk_text])[0] if all_chunks else embed_texts(["法律知识库"])[0]
