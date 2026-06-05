@@ -7,14 +7,15 @@ from time import perf_counter
 from typing import Any
 
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 
 from app.db import get_db_status, init_db
 from app.embedding_client import get_embedding_config_status
 from app.graph import process_ticket, process_ticket_steps
+from app.legal_docx_parser import parse_legal_docx_directory
 from app.legal_kb import get_legal_retrieval_config_status, prewarm_legal_vector_index
-from app.legal_pg_kb import get_pg_legal_kb_status, import_legal_docx_directory
+from app.legal_pg_kb import get_pg_legal_kb_status, import_legal_docx_directory, list_legal_chunks_from_pg
 from app.llm_client import get_llm_config_status, ping_llm
 from app.mock_data import MOCK_TICKETS
 from app.models import ProcessingResult, SupplementTask, Ticket
@@ -82,6 +83,8 @@ def create_app() -> FastAPI:
                 "GET /embedding/config",
                 "GET /retrieval/config",
                 "GET /legal-kb/status",
+                "GET /legal-kb/preview",
+                "GET /legal-kb/chunks",
                 "POST /legal-kb/import",
                 "POST /process-all",
             ],
@@ -211,13 +214,59 @@ def create_app() -> FastAPI:
 
         return get_pg_legal_kb_status()
 
+    @app.get("/legal-kb/preview")
+    def legal_kb_preview(
+        path: str = "legalDocx",
+        limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        """预览法规文件切片结果，不写入数据库。"""
+
+        directory = resolve_project_path(path)
+        if not directory.exists() or not directory.is_dir():
+            raise HTTPException(status_code=400, detail=f"法规目录不存在：{directory}")
+        documents = parse_legal_docx_directory(directory)
+        flat_items = []
+        total_chunks = 0
+        for document in documents:
+            for chunk in document.chunks:
+                if offset <= total_chunks < offset + limit:
+                    flat_items.append(
+                        {
+                            "source_file": chunk.source_file,
+                            "law_name": chunk.law_name,
+                            "chapter": chunk.chapter,
+                            "article": chunk.article,
+                            "sequence": chunk.sequence,
+                            "chunk_key": chunk.chunk_key,
+                            "chunk_text": chunk.chunk_text,
+                        }
+                    )
+                total_chunks += 1
+        return {
+            "source": "files",
+            "path": str(directory),
+            "document_count": len(documents),
+            "chunk_count": total_chunks,
+            "limit": limit,
+            "offset": offset,
+            "items": flat_items,
+        }
+
+    @app.get("/legal-kb/chunks")
+    def legal_kb_chunks(
+        limit: int = Query(default=50, ge=1, le=500),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        """查看 PostgreSQL 中已经导入的法规知识库片段。"""
+
+        return list_legal_chunks_from_pg(limit=limit, offset=offset)
+
     @app.post("/legal-kb/import")
     def import_legal_kb(request: LegalKbImportRequest) -> dict[str, Any]:
         """从 docx 目录导入真实法律知识库；正式环境建议使用脚本执行。"""
 
-        directory = Path(request.path)
-        if not directory.is_absolute():
-            directory = Path(__file__).resolve().parent.parent / directory
+        directory = resolve_project_path(request.path)
         if not directory.exists() or not directory.is_dir():
             raise HTTPException(status_code=400, detail=f"法规目录不存在：{directory}")
         try:
@@ -241,3 +290,12 @@ def get_mock_ticket(ticket_no: str) -> Ticket:
         if ticket.ticket_no == ticket_no:
             return ticket
     raise KeyError(ticket_no)
+
+
+def resolve_project_path(path: str) -> Path:
+    """把相对路径解析到项目根目录，绝对路径保持不变。"""
+
+    resolved = Path(path)
+    if resolved.is_absolute():
+        return resolved
+    return Path(__file__).resolve().parent.parent / resolved

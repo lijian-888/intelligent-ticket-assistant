@@ -8,6 +8,7 @@ const AI_RESULT_CACHE_VERSION = "20260604-reranker-v1";
 const els = {
   rows: document.getElementById("ticketRows"),
   ticketCount: document.getElementById("ticketCount"),
+  legalKbBtn: document.getElementById("legalKbBtn"),
   supplementTasksBtn: document.getElementById("supplementTasksBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
   processAllBtn: document.getElementById("processAllBtn"),
@@ -156,6 +157,9 @@ els.refreshBtn.addEventListener("click", loadTickets);
 els.processAllBtn.addEventListener("click", processAll);
 els.supplementTasksBtn.addEventListener("click", () => {
   window.location.href = "/demo/supplement-tasks.html";
+});
+els.legalKbBtn.addEventListener("click", () => {
+  window.location.href = "/demo/legal-kb.html";
 });
 
 loadCachedResults();

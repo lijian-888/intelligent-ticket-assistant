@@ -93,6 +93,52 @@ def get_pg_legal_kb_status() -> dict[str, Any]:
         return status
 
 
+def list_legal_chunks_from_pg(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """分页查看 PostgreSQL 中已经入库的法规切片。"""
+
+    status = get_pg_legal_kb_status()
+    if not status["configured"] or status.get("last_error"):
+        return {**status, "items": []}
+    with _connect() as conn:
+        _ensure_schema(conn)
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    chunk_key,
+                    law_name,
+                    chapter,
+                    article,
+                    chunk_text,
+                    sequence,
+                    embedding_model,
+                    embedding_dimension,
+                    metadata ->> 'source_file' AS source_file
+                FROM legal_chunks
+                WHERE is_active = TRUE
+                ORDER BY law_name, sequence
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+            rows = cursor.fetchall()
+    items = [
+        {
+            "chunk_key": row[0],
+            "law_name": row[1],
+            "chapter": row[2],
+            "article": row[3],
+            "chunk_text": row[4],
+            "sequence": row[5],
+            "embedding_model": row[6],
+            "embedding_dimension": row[7],
+            "source_file": row[8] or "",
+        }
+        for row in rows
+    ]
+    return {**status, "limit": limit, "offset": offset, "items": items}
+
+
 def import_legal_docx_directory(directory: Path, rebuild: bool = False) -> dict[str, Any]:
     """解析目录中的法规 docx、doc、pdf，生成向量后持久化到 PostgreSQL + pgvector。"""
 

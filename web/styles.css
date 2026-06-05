@@ -206,6 +206,115 @@ body {
   width: 190px;
 }
 
+.legal-kb-layout {
+  grid-template-rows: auto 1fr;
+}
+
+.legal-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  flex-wrap: wrap;
+}
+
+.legal-toolbar label {
+  display: grid;
+  gap: 4px;
+  color: #14345d;
+  font-weight: 700;
+}
+
+.legal-toolbar input,
+.legal-toolbar select {
+  min-width: 150px;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid #b9c4d1;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.legal-toolbar #pathInput {
+  min-width: 320px;
+}
+
+.summary-row {
+  padding: 0 12px 12px;
+}
+
+.legal-chunk-wrap {
+  height: calc(100vh - 180px);
+  max-height: calc(100vh - 180px);
+}
+
+.legal-chunk-table {
+  width: 100%;
+  min-width: 1320px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.legal-chunk-table th,
+.legal-chunk-table td {
+  padding: 8px;
+  border-bottom: 1px solid #e4e9f0;
+  vertical-align: top;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.legal-chunk-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eef3f8;
+  text-align: left;
+}
+
+.legal-chunk-table th:nth-child(1),
+.legal-chunk-table td:nth-child(1) {
+  width: 64px;
+}
+
+.legal-chunk-table th:nth-child(2),
+.legal-chunk-table td:nth-child(2) {
+  width: 210px;
+}
+
+.legal-chunk-table th:nth-child(3),
+.legal-chunk-table td:nth-child(3) {
+  width: 150px;
+}
+
+.legal-chunk-table th:nth-child(4),
+.legal-chunk-table td:nth-child(4) {
+  width: 100px;
+}
+
+.legal-chunk-table th:nth-child(5),
+.legal-chunk-table td:nth-child(5) {
+  width: 230px;
+}
+
+.source-file-cell {
+  color: #245b95;
+}
+
+.chunk-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  color: #1f2933;
+}
+
+.empty-cell {
+  height: 120px;
+  color: #687789;
+  text-align: center;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: minmax(520px, 1.2fr) minmax(420px, 0.8fr);

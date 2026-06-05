@@ -410,6 +410,40 @@ def test_legal_kb_status_endpoint_uses_mock_backend_in_tests():
     assert body["configured"] is False
 
 
+def test_legal_kb_preview_endpoint_returns_file_chunks(tmp_path):
+    """法规切片预览接口应返回目录中文件的切片结果。"""
+
+    docx_path = tmp_path / "测试法规.docx"
+    _write_minimal_docx(
+        docx_path,
+        [
+            "测试法规",
+            "第一条　用于预览接口测试。",
+            "第二条　测试分页和片段内容。",
+        ],
+    )
+
+    response = client.get("/legal-kb/preview", params={"path": str(tmp_path), "limit": 1, "offset": 1})
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["document_count"] == 1
+    assert body["chunk_count"] == 2
+    assert len(body["items"]) == 1
+    assert body["items"][0]["article"] == "第二条"
+
+
+def test_legal_kb_chunks_endpoint_returns_empty_when_postgres_disabled():
+    """测试环境未启用 PostgreSQL 知识库时，数据库片段接口应返回空列表和状态。"""
+
+    response = client.get("/legal-kb/chunks")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["configured"] is False
+    assert body["items"] == []
+
+
 def test_parse_legal_docx_splits_articles(tmp_path):
     """法规 docx 解析器应跳过目录，并按条文切分正文。"""
 

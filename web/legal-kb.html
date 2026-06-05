@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>法律知识库切片预览</title>
+  <link rel="stylesheet" href="/demo/styles.css?v=20260605-legal-kb" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>法律知识库切片预览</h1>
+      <p>查看法规文件解析后的知识库片段，以及已入库的 PostgreSQL pgvector 数据</p>
+    </div>
+    <div class="top-actions">
+      <button id="backBtn" class="btn secondary">返回工单</button>
+      <button id="refreshBtn" class="btn primary">刷新</button>
+    </div>
+  </header>
+
+  <main class="layout legal-kb-layout">
+    <section class="panel">
+      <div class="legal-toolbar">
+        <label>
+          数据来源
+          <select id="sourceSelect">
+            <option value="files">法规文件切片预览</option>
+            <option value="db">数据库已入库片段</option>
+          </select>
+        </label>
+        <label>
+          文件目录
+          <input id="pathInput" type="text" value="legalDocx" />
+        </label>
+        <label>
+          每页条数
+          <input id="limitInput" type="number" min="1" max="500" value="50" />
+        </label>
+        <button id="prevBtn" class="btn secondary">上一页</button>
+        <button id="nextBtn" class="btn secondary">下一页</button>
+      </div>
+      <div class="summary-row">
+        <span id="summaryText" class="muted">尚未加载</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="table-wrap legal-chunk-wrap">
+        <table class="legal-chunk-table">
+          <thead>
+            <tr>
+              <th>序号</th>
+              <th>法规名称</th>
+              <th>章节</th>
+              <th>条号</th>
+              <th>来源文件</th>
+              <th>片段内容</th>
+            </tr>
+          </thead>
+          <tbody id="chunkRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/demo/common.js?v=20260605-legal-kb"></script>
+  <script src="/demo/legal-kb.js?v=20260605-legal-kb"></script>
+</body>
+</html>
