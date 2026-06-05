@@ -10,6 +10,7 @@ from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, T
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
 from app.supplement import build_supplement_task
+from scripts.clean_legal_filenames import clean_legal_filename
 
 
 client = TestClient(create_app())
@@ -472,6 +473,15 @@ def test_parse_legal_docx_splits_articles(tmp_path):
     assert document.chunks[0].article == "第一条"
     assert "目录" not in document.chunks[0].chunk_text
     assert "投诉举报处理" in document.chunks[1].chunk_text
+
+
+def test_clean_legal_filename_removes_number_or_x_prefix():
+    """法规文件名清理脚本应去掉开头数字、连接符或 X 标记。"""
+
+    assert clean_legal_filename("01-中华人民共和国宪法.docx") == "中华人民共和国宪法.docx"
+    assert clean_legal_filename("100中华人民共和国噪声污染防治法.docx") == "中华人民共和国噪声污染防治法.docx"
+    assert clean_legal_filename("X中华人民共和国反不正当竞争法_20250627.docx") == "中华人民共和国反不正当竞争法_20250627.docx"
+    assert clean_legal_filename("中华人民共和国公司法.docx") == "中华人民共和国公司法.docx"
 
 
 def test_parse_legal_docx_falls_back_for_decision_documents(tmp_path):
