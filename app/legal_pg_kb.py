@@ -93,15 +93,25 @@ def get_pg_legal_kb_status() -> dict[str, Any]:
         return status
 
 
-def list_legal_chunks_from_pg(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+def list_legal_chunks_from_pg(limit: int = 50, offset: int = 0, source_file: str = "") -> dict[str, Any]:
     """分页查看 PostgreSQL 中已经入库的法规切片。"""
 
     status = get_pg_legal_kb_status()
     if not status["configured"] or status.get("last_error"):
         return {**status, "items": []}
+    where_clause = "WHERE is_active = TRUE"
+    params: list[Any] = []
+    if source_file:
+        where_clause += " AND metadata ->> 'source_file' ILIKE %s"
+        params.append(f"%{source_file}%")
     with _connect() as conn:
         _ensure_schema(conn)
         with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT COUNT(*) FROM legal_chunks {where_clause}",
+                params,
+            )
+            filtered_chunk_count = cursor.fetchone()[0]
             cursor.execute(
                 """
                 SELECT
@@ -115,11 +125,11 @@ def list_legal_chunks_from_pg(limit: int = 50, offset: int = 0) -> dict[str, Any
                     embedding_dimension,
                     metadata ->> 'source_file' AS source_file
                 FROM legal_chunks
-                WHERE is_active = TRUE
+                {where_clause}
                 ORDER BY law_name, sequence
                 LIMIT %s OFFSET %s
-                """,
-                (limit, offset),
+                """.format(where_clause=where_clause),
+                [*params, limit, offset],
             )
             rows = cursor.fetchall()
     items = [
@@ -136,7 +146,14 @@ def list_legal_chunks_from_pg(limit: int = 50, offset: int = 0) -> dict[str, Any
         }
         for row in rows
     ]
-    return {**status, "limit": limit, "offset": offset, "items": items}
+    return {
+        **status,
+        "filtered_chunk_count": filtered_chunk_count,
+        "source_file_filter": source_file,
+        "limit": limit,
+        "offset": offset,
+        "items": items,
+    }
 
 
 def import_legal_docx_directory(directory: Path, rebuild: bool = False) -> dict[str, Any]:

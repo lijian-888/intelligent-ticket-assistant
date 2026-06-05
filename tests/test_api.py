@@ -415,6 +415,7 @@ def test_legal_kb_preview_endpoint_returns_file_chunks(tmp_path):
     """法规切片预览接口应返回目录中文件的切片结果。"""
 
     docx_path = tmp_path / "测试法规.docx"
+    other_docx_path = tmp_path / "其他法规.docx"
     _write_minimal_docx(
         docx_path,
         [
@@ -423,21 +424,39 @@ def test_legal_kb_preview_endpoint_returns_file_chunks(tmp_path):
             "第二条　测试分页和片段内容。",
         ],
     )
+    _write_minimal_docx(
+        other_docx_path,
+        [
+            "其他法规",
+            "第一条　不应出现在测试法规搜索结果中。",
+        ],
+    )
 
     response = client.get("/legal-kb/preview", params={"path": str(tmp_path), "limit": 1, "offset": 1})
     body = response.json()
 
     assert response.status_code == 200
-    assert body["document_count"] == 1
-    assert body["chunk_count"] == 2
+    assert body["document_count"] == 2
+    assert body["chunk_count"] == 3
     assert len(body["items"]) == 1
-    assert body["items"][0]["article"] == "第二条"
+    assert body["items"][0]["article"] in {"第一条", "第二条"}
+
+    search_response = client.get(
+        "/legal-kb/preview",
+        params={"path": str(tmp_path), "source_file": "测试法规", "limit": 10},
+    )
+    search_body = search_response.json()
+
+    assert search_response.status_code == 200
+    assert search_body["chunk_count"] == 3
+    assert search_body["filtered_chunk_count"] == 2
+    assert all("测试法规" in item["source_file"] for item in search_body["items"])
 
 
 def test_legal_kb_chunks_endpoint_returns_empty_when_postgres_disabled():
     """测试环境未启用 PostgreSQL 知识库时，数据库片段接口应返回空列表和状态。"""
 
-    response = client.get("/legal-kb/chunks")
+    response = client.get("/legal-kb/chunks", params={"source_file": "黄河保护法"})
     body = response.json()
 
     assert response.status_code == 200

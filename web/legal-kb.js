@@ -6,7 +6,10 @@ const kbState = {
 const kbEls = {
   sourceSelect: document.getElementById("sourceSelect"),
   pathInput: document.getElementById("pathInput"),
+  sourceFileInput: document.getElementById("sourceFileInput"),
   limitInput: document.getElementById("limitInput"),
+  searchBtn: document.getElementById("searchBtn"),
+  clearSearchBtn: document.getElementById("clearSearchBtn"),
   prevBtn: document.getElementById("prevBtn"),
   nextBtn: document.getElementById("nextBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -24,6 +27,10 @@ async function loadChunks() {
   const source = kbEls.sourceSelect.value;
   const limit = getLimit();
   const params = new URLSearchParams({ limit: String(limit), offset: String(kbState.offset) });
+  const sourceFile = kbEls.sourceFileInput.value.trim();
+  if (sourceFile) {
+    params.set("source_file", sourceFile);
+  }
   if (source === "files") {
     params.set("path", kbEls.pathInput.value || "legalDocx");
   }
@@ -44,9 +51,13 @@ async function loadChunks() {
 function renderSummary(data, source) {
   const sourceText = source === "files" ? "法规文件切片预览" : "数据库已入库片段";
   const modelText = data.embedding_models?.length ? `；向量模型：${data.embedding_models.join("，")}` : "";
-  kbEls.summaryText.textContent = `${sourceText}：文档 ${data.document_count || 0} 个，片段 ${data.chunk_count || 0} 个，当前 ${data.offset || 0} - ${(data.offset || 0) + (data.items || []).length}${modelText}`;
+  const filteredText = data.source_file_filter
+    ? `，来源文件包含“${data.source_file_filter}”的片段 ${data.filtered_chunk_count || 0} 个`
+    : "";
+  const visibleTotal = data.source_file_filter ? data.filtered_chunk_count || 0 : data.chunk_count || 0;
+  kbEls.summaryText.textContent = `${sourceText}：文档 ${data.document_count || 0} 个，片段 ${data.chunk_count || 0} 个${filteredText}，当前 ${data.offset || 0} - ${(data.offset || 0) + (data.items || []).length}${modelText}`;
   kbEls.prevBtn.disabled = kbState.offset <= 0;
-  kbEls.nextBtn.disabled = kbState.offset + getLimit() >= (data.chunk_count || 0);
+  kbEls.nextBtn.disabled = kbState.offset + getLimit() >= visibleTotal;
 }
 
 function renderRows(items, offset) {
@@ -80,6 +91,24 @@ function setLoading(loading) {
 kbEls.refreshBtn.addEventListener("click", () => {
   kbState.offset = 0;
   loadChunks();
+});
+
+kbEls.searchBtn.addEventListener("click", () => {
+  kbState.offset = 0;
+  loadChunks();
+});
+
+kbEls.clearSearchBtn.addEventListener("click", () => {
+  kbState.offset = 0;
+  kbEls.sourceFileInput.value = "";
+  loadChunks();
+});
+
+kbEls.sourceFileInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    kbState.offset = 0;
+    loadChunks();
+  }
 });
 
 kbEls.prevBtn.addEventListener("click", () => {

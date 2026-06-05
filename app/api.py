@@ -217,6 +217,7 @@ def create_app() -> FastAPI:
     @app.get("/legal-kb/preview")
     def legal_kb_preview(
         path: str = "legalDocx",
+        source_file: str = "",
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
@@ -228,9 +229,13 @@ def create_app() -> FastAPI:
         documents = parse_legal_docx_directory(directory)
         flat_items = []
         total_chunks = 0
+        filtered_chunks = 0
         for document in documents:
             for chunk in document.chunks:
-                if offset <= total_chunks < offset + limit:
+                total_chunks += 1
+                if source_file and source_file not in Path(chunk.source_file).name:
+                    continue
+                if offset <= filtered_chunks < offset + limit:
                     flat_items.append(
                         {
                             "source_file": chunk.source_file,
@@ -242,12 +247,14 @@ def create_app() -> FastAPI:
                             "chunk_text": chunk.chunk_text,
                         }
                     )
-                total_chunks += 1
+                filtered_chunks += 1
         return {
             "source": "files",
             "path": str(directory),
             "document_count": len(documents),
             "chunk_count": total_chunks,
+            "filtered_chunk_count": filtered_chunks,
+            "source_file_filter": source_file,
             "limit": limit,
             "offset": offset,
             "items": flat_items,
@@ -255,12 +262,13 @@ def create_app() -> FastAPI:
 
     @app.get("/legal-kb/chunks")
     def legal_kb_chunks(
+        source_file: str = "",
         limit: int = Query(default=50, ge=1, le=500),
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
         """查看 PostgreSQL 中已经导入的法规知识库片段。"""
 
-        return list_legal_chunks_from_pg(limit=limit, offset=offset)
+        return list_legal_chunks_from_pg(limit=limit, offset=offset, source_file=source_file)
 
     @app.post("/legal-kb/import")
     def import_legal_kb(request: LegalKbImportRequest) -> dict[str, Any]:
