@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 from app.embedding_client import cosine_similarity, embed_texts, get_embedding_runtime_model
+from app.legal_pg_kb import (
+    get_pg_legal_kb_status,
+    is_pg_legal_kb_configured,
+    search_legal_references_from_pg,
+)
 from app.models import LegalReference, StructuredTicket, Ticket
 from app.reranker_client import get_reranker_runtime_model, rerank_documents
 
@@ -127,6 +132,7 @@ def get_legal_retrieval_config_status() -> dict[str, object]:
     """返回法律条款混合检索配置，便于在接口中排查阈值和 Top K。"""
 
     return {
+        "backend": "postgres" if is_pg_legal_kb_configured() else "mock",
         "vector_top_k": LEGAL_VECTOR_TOP_K,
         "display_top_k": LEGAL_DISPLAY_TOP_K,
         "min_relevance_score": LEGAL_MIN_RELEVANCE_SCORE,
@@ -140,6 +146,15 @@ def prewarm_legal_vector_index() -> dict[str, object]:
 
     if not LEGAL_PREWARM_ON_STARTUP:
         return {"enabled": False, "message": "LEGAL_PREWARM_ON_STARTUP=false，跳过预热。"}
+    if is_pg_legal_kb_configured():
+        status = get_pg_legal_kb_status()
+        return {
+            "enabled": True,
+            "backend": "postgres",
+            "document_count": status.get("document_count", 0),
+            "chunk_count": status.get("chunk_count", 0),
+            "last_error": status.get("last_error", ""),
+        }
     warmup_vector = embed_texts(["法律知识库向量索引预热"])[0]
     model = get_embedding_runtime_model()
     index = _get_vector_index(model)
@@ -158,6 +173,14 @@ def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limi
         f"{ticket.title}\n{ticket.content}\n{ticket.ticket_type}\n{ticket.appeal_purpose}\n"
         f"{structured.case_nature.value}\n{structured.appeal}\n{' '.join(structured.keywords)}"
     )
+    if is_pg_legal_kb_configured():
+        return search_legal_references_from_pg(
+            query_text=query_text,
+            vector_top_k=LEGAL_VECTOR_TOP_K,
+            display_top_k=limit or LEGAL_DISPLAY_TOP_K,
+            min_relevance_score=LEGAL_MIN_RELEVANCE_SCORE,
+            enable_reranker=LEGAL_ENABLE_RERANKER,
+        )
     query_vector = embed_texts([query_text])[0]
     query_model = get_embedding_runtime_model()
     scored = [

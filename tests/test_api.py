@@ -1,9 +1,11 @@
 ﻿from fastapi.testclient import TestClient
 import pytest
+from zipfile import ZipFile
 
 from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
+from app.legal_docx_parser import parse_legal_docx
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
@@ -40,6 +42,7 @@ def disable_real_llm_calls(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr("app.db.DB_PATH", tmp_path / "test_demo.db")
+    monkeypatch.setenv("LEGAL_KB_BACKEND", "mock")
     init_db()
     with get_connection() as conn:
         conn.execute("DELETE FROM supplement_tasks")
@@ -393,6 +396,69 @@ def test_retrieval_config_endpoint_contains_reranker_settings():
     assert "embedding" in body
     assert "reranker" in body
     assert "api_key" not in body["reranker"]
+    assert "legal_kb" in body
+
+
+def test_legal_kb_status_endpoint_uses_mock_backend_in_tests():
+    """测试环境应使用 mock 知识库后端，避免误连真实 PostgreSQL。"""
+
+    response = client.get("/legal-kb/status")
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["backend"] == "mock"
+    assert body["configured"] is False
+
+
+def test_parse_legal_docx_splits_articles(tmp_path):
+    """法规 docx 解析器应跳过目录，并按条文切分正文。"""
+
+    docx_path = tmp_path / "测试法规.docx"
+    _write_minimal_docx(
+        docx_path,
+        [
+            "测试法规",
+            "（2026年1月1日发布）",
+            "目　　录",
+            "第一章　总　　则",
+            "第二章　法律责任",
+            "第一章　总　　则",
+            "第一条　为了测试知识库导入，制定本规定。",
+            "第二条　市场监管部门依法处理相关事项。",
+            "（一）投诉举报处理。",
+            "第二章　法律责任",
+            "第三条　违反本规定的，依法处理。",
+        ],
+    )
+
+    document = parse_legal_docx(docx_path)
+
+    assert document.law_name == "测试法规"
+    assert len(document.chunks) == 3
+    assert document.chunks[0].article == "第一条"
+    assert "目录" not in document.chunks[0].chunk_text
+    assert "投诉举报处理" in document.chunks[1].chunk_text
+
+
+def test_parse_legal_docx_falls_back_for_decision_documents(tmp_path):
+    """没有条文编号的决定类文件应按段落兜底切分，避免入库时丢失。"""
+
+    docx_path = tmp_path / "测试决定.docx"
+    _write_minimal_docx(
+        docx_path,
+        [
+            "全国人民代表大会常务委员会关于测试事项的决定",
+            "为了测试没有条文编号的法规文件，作出如下决定。",
+            "一、加强市场监管相关工作。",
+            "二、依法处理投诉举报事项。",
+        ],
+    )
+
+    document = parse_legal_docx(docx_path)
+
+    assert len(document.chunks) >= 1
+    assert document.chunks[0].article == "全文片段1"
+    assert "投诉举报事项" in "\n".join(chunk.chunk_text for chunk in document.chunks)
 
 
 def test_embedding_remote_failure_falls_back_to_local_vector(monkeypatch):
@@ -796,3 +862,27 @@ def test_low_confidence_acceptance_precheck_falls_back_to_rule(monkeypatch):
     assert response.status_code == 200
     assert body["status"] == "待流转"
     assert body["acceptance_precheck"]["audit"]["accepted"] is False
+
+
+def _write_minimal_docx(path, paragraphs):
+    """写入测试用最小 docx 文件，只包含 document.xml 段落文本。"""
+
+    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    body = "".join(
+        f'<w:p><w:r><w:t>{text}</w:t></w:r></w:p>'
+        for text in paragraphs
+    )
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{namespace}"><w:body>{body}</w:body></w:document>'
+    )
+    with ZipFile(path, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/word/document.xml" '
+            'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+            "</Types>",
+        )
+        archive.writestr("word/document.xml", document_xml)

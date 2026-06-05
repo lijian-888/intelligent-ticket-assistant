@@ -6,6 +6,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
@@ -13,6 +14,7 @@ from app.db import get_db_status, init_db
 from app.embedding_client import get_embedding_config_status
 from app.graph import process_ticket, process_ticket_steps
 from app.legal_kb import get_legal_retrieval_config_status, prewarm_legal_vector_index
+from app.legal_pg_kb import get_pg_legal_kb_status, import_legal_docx_directory
 from app.llm_client import get_llm_config_status, ping_llm
 from app.mock_data import MOCK_TICKETS
 from app.models import ProcessingResult, SupplementTask, Ticket
@@ -21,6 +23,13 @@ from app.smart_transfer import smart_transfer_ticket
 from app.supplement import create_or_update_supplement_task, list_saved_supplement_tasks
 
 logger = logging.getLogger("uvicorn.error")
+
+
+class LegalKbImportRequest(BaseModel):
+    """法律知识库导入请求；demo 默认导入项目根目录下的 legalDocx。"""
+
+    path: str = "legalDocx"
+    rebuild: bool = False
 
 
 def create_app() -> FastAPI:
@@ -72,6 +81,8 @@ def create_app() -> FastAPI:
                 "GET /llm/health",
                 "GET /embedding/config",
                 "GET /retrieval/config",
+                "GET /legal-kb/status",
+                "POST /legal-kb/import",
                 "POST /process-all",
             ],
         }
@@ -191,7 +202,28 @@ def create_app() -> FastAPI:
             "legal_retrieval": get_legal_retrieval_config_status(),
             "embedding": get_embedding_config_status(),
             "reranker": get_reranker_config_status(),
+            "legal_kb": get_pg_legal_kb_status(),
         }
+
+    @app.get("/legal-kb/status")
+    def legal_kb_status() -> dict[str, Any]:
+        """查看真实法律知识库状态，包括 PostgreSQL 是否配置和已导入条文数量。"""
+
+        return get_pg_legal_kb_status()
+
+    @app.post("/legal-kb/import")
+    def import_legal_kb(request: LegalKbImportRequest) -> dict[str, Any]:
+        """从 docx 目录导入真实法律知识库；正式环境建议使用脚本执行。"""
+
+        directory = Path(request.path)
+        if not directory.is_absolute():
+            directory = Path(__file__).resolve().parent.parent / directory
+        if not directory.exists() or not directory.is_dir():
+            raise HTTPException(status_code=400, detail=f"法规目录不存在：{directory}")
+        try:
+            return import_legal_docx_directory(directory, rebuild=request.rebuild)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}") from exc
 
     @app.post("/process-all", response_model=list[ProcessingResult])
     def process_all() -> list[ProcessingResult]:
