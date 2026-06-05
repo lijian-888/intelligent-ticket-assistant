@@ -53,11 +53,12 @@ async function api(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
     let detail = response.statusText;
+    const text = await response.text();
     try {
-      const body = await response.json();
+      const body = JSON.parse(text);
       detail = body.detail || JSON.stringify(body);
     } catch (_) {
-      detail = await response.text();
+      detail = text || detail;
     }
     throw new Error(detail);
   }
