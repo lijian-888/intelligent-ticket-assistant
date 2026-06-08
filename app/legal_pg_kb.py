@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,9 +27,11 @@ class LegalPgConfig:
     database_url: str
     import_batch_size: int
     vector_top_k: int
+    keyword_top_k: int
     display_top_k: int
     min_relevance_score: float
     enable_reranker: bool
+    enable_keyword_search: bool
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,7 @@ class PgLegalCandidate:
     embedding_model: str
     vector_score: float
     final_score: float
+    keyword_score: float = 0.0
     rerank_score: float = 0.0
     reranker_model: str = ""
 
@@ -63,6 +67,8 @@ def get_pg_legal_kb_status() -> dict[str, Any]:
         "configured": is_pg_legal_kb_configured(),
         "database_url_set": bool(config.database_url),
         "import_batch_size": config.import_batch_size,
+        "keyword_top_k": config.keyword_top_k,
+        "enable_keyword_search": config.enable_keyword_search,
         "document_count": 0,
         "chunk_count": 0,
         "embedding_models": [],
@@ -201,43 +207,17 @@ def search_legal_references_from_pg(
         return []
     query_vector = embed_texts([query_text])[0]
     vector_literal = _vector_literal(query_vector)
+    config = read_legal_pg_config()
     with _connect() as conn:
         _ensure_schema(conn, embedding_dimension=len(query_vector))
-        with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT
-                    chunk_key,
-                    law_name,
-                    chapter,
-                    article,
-                    chunk_text,
-                    embedding_model,
-                    1 - (embedding <=> %s::vector) AS vector_score
-                FROM legal_chunks
-                WHERE is_active = TRUE
-                    AND embedding_dimension = %s
-                ORDER BY embedding <=> %s::vector
-                LIMIT %s
-                """,
-                (vector_literal, len(query_vector), vector_literal, vector_top_k),
-            )
-            rows = cursor.fetchall()
-
-    candidates = [
-        PgLegalCandidate(
-            chunk_key=row[0],
-            law_name=row[1],
-            chapter=row[2],
-            article=row[3],
-            chunk_text=row[4],
-            embedding_model=row[5],
-            vector_score=float(row[6]),
-            final_score=float(row[6]),
+        vector_candidates = _search_vector_candidates(conn, vector_literal, len(query_vector), vector_top_k)
+        keyword_candidates = (
+            _search_keyword_candidates(conn, query_text, config.keyword_top_k)
+            if config.enable_keyword_search
+            else []
         )
-        for row in rows
-        if row[6] is not None and float(row[6]) > 0
-    ]
+
+    candidates = _merge_candidates(vector_candidates, keyword_candidates)
     if enable_reranker:
         candidates = _rerank_pg_candidates(query_text, candidates, display_top_k)
     return _build_references(candidates, display_top_k, min_relevance_score)
@@ -254,9 +234,11 @@ def read_legal_pg_config() -> LegalPgConfig:
         "LEGAL_DATABASE_URL",
         "LEGAL_IMPORT_BATCH_SIZE",
         "LEGAL_VECTOR_TOP_K",
+        "LEGAL_KEYWORD_TOP_K",
         "LEGAL_DISPLAY_TOP_K",
         "LEGAL_MIN_RELEVANCE_SCORE",
         "LEGAL_ENABLE_RERANKER",
+        "LEGAL_ENABLE_KEYWORD_SEARCH",
     ):
         env_value = os.getenv(key)
         if env_value not in (None, ""):
@@ -266,9 +248,11 @@ def read_legal_pg_config() -> LegalPgConfig:
         database_url=str(values.get("LEGAL_DATABASE_URL") or ""),
         import_batch_size=max(1, int(values.get("LEGAL_IMPORT_BATCH_SIZE") or 16)),
         vector_top_k=int(values.get("LEGAL_VECTOR_TOP_K") or 10),
+        keyword_top_k=int(values.get("LEGAL_KEYWORD_TOP_K") or 10),
         display_top_k=int(values.get("LEGAL_DISPLAY_TOP_K") or 3),
         min_relevance_score=float(values.get("LEGAL_MIN_RELEVANCE_SCORE") or 0.55),
         enable_reranker=str(values.get("LEGAL_ENABLE_RERANKER") or "true").lower() == "true",
+        enable_keyword_search=str(values.get("LEGAL_ENABLE_KEYWORD_SEARCH") or "true").lower() == "true",
     )
 
 
@@ -329,6 +313,190 @@ def _ensure_schema(conn, embedding_dimension: int | None = None) -> None:
         # 当前法规库规模较小，先使用 pgvector 顺序召回，避免 embedding 维度未稳定时索引创建失败。
         # 后续确认 bge-m3 返回维度后，可再为 embedding 增加 HNSW/IVFFLAT 专用索引。
     conn.commit()
+
+
+def _search_vector_candidates(conn, vector_literal: str, embedding_dimension: int, vector_top_k: int) -> list[PgLegalCandidate]:
+    """用 pgvector 召回语义相近的法律片段。"""
+
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                chunk_key,
+                law_name,
+                chapter,
+                article,
+                chunk_text,
+                embedding_model,
+                1 - (embedding <=> %s::vector) AS vector_score
+            FROM legal_chunks
+            WHERE is_active = TRUE
+                AND embedding_dimension = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+            """,
+            (vector_literal, embedding_dimension, vector_literal, vector_top_k),
+        )
+        rows = cursor.fetchall()
+    return [
+        PgLegalCandidate(
+            chunk_key=row[0],
+            law_name=row[1],
+            chapter=row[2],
+            article=row[3],
+            chunk_text=row[4],
+            embedding_model=row[5],
+            vector_score=float(row[6]),
+            final_score=float(row[6]),
+        )
+        for row in rows
+        if row[6] is not None and float(row[6]) > 0
+    ]
+
+
+def _search_keyword_candidates(conn, query_text: str, keyword_top_k: int) -> list[PgLegalCandidate]:
+    """用关键词短语命中补充召回，解决法律术语、条号和固定表述被向量召回漏掉的问题。"""
+
+    terms = _extract_keyword_terms(query_text)
+    if not terms:
+        return []
+    conditions = []
+    where_params: list[Any] = []
+    for term in terms:
+        conditions.append("(law_name ILIKE %s OR article ILIKE %s OR chunk_text ILIKE %s)")
+        like = f"%{term}%"
+        where_params.extend([like, like, like])
+    score_parts = []
+    score_params: list[Any] = []
+    for term in terms:
+        score_parts.append(
+            """
+            CASE
+                WHEN law_name ILIKE %s THEN 3
+                WHEN article ILIKE %s THEN 2
+                WHEN chunk_text ILIKE %s THEN 1
+                ELSE 0
+            END
+            """
+        )
+        like = f"%{term}%"
+        score_params.extend([like, like, like])
+    params = [*score_params, max(1, len(terms)), *where_params, keyword_top_k]
+    sql = f"""
+        SELECT
+            chunk_key,
+            law_name,
+            chapter,
+            article,
+            chunk_text,
+            embedding_model,
+            ({' + '.join(score_parts)})::float / (%s * 3.0) AS keyword_score
+        FROM legal_chunks
+        WHERE is_active = TRUE
+            AND ({' OR '.join(conditions)})
+        ORDER BY keyword_score DESC, sequence ASC
+        LIMIT %s
+    """
+    with conn.cursor() as cursor:
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+    return [
+        PgLegalCandidate(
+            chunk_key=row[0],
+            law_name=row[1],
+            chapter=row[2],
+            article=row[3],
+            chunk_text=row[4],
+            embedding_model=row[5],
+            vector_score=0.0,
+            keyword_score=float(row[6] or 0.0),
+            final_score=float(row[6] or 0.0),
+        )
+        for row in rows
+        if row[6] is not None and float(row[6]) > 0
+    ]
+
+
+def _merge_candidates(
+    vector_candidates: list[PgLegalCandidate],
+    keyword_candidates: list[PgLegalCandidate],
+) -> list[PgLegalCandidate]:
+    """合并语义召回和关键词召回候选，同一 chunk 只保留一条并合并分数。"""
+
+    merged: dict[str, PgLegalCandidate] = {}
+    for candidate in [*vector_candidates, *keyword_candidates]:
+        existing = merged.get(candidate.chunk_key)
+        if existing is None:
+            merged[candidate.chunk_key] = candidate
+            continue
+        merged[candidate.chunk_key] = PgLegalCandidate(
+            chunk_key=existing.chunk_key,
+            law_name=existing.law_name,
+            chapter=existing.chapter,
+            article=existing.article,
+            chunk_text=existing.chunk_text,
+            embedding_model=existing.embedding_model or candidate.embedding_model,
+            vector_score=max(existing.vector_score, candidate.vector_score),
+            keyword_score=max(existing.keyword_score, candidate.keyword_score),
+            final_score=max(existing.final_score, candidate.final_score),
+            rerank_score=max(existing.rerank_score, candidate.rerank_score),
+            reranker_model=existing.reranker_model or candidate.reranker_model,
+        )
+    return sorted(
+        merged.values(),
+        key=lambda item: (max(item.vector_score, item.keyword_score), item.vector_score, item.keyword_score),
+        reverse=True,
+    )
+
+
+def _extract_keyword_terms(query_text: str, max_terms: int = 12) -> list[str]:
+    """从工单文本中提取适合数据库短语命中的关键词。"""
+
+    normalized = re.sub(r"\s+", " ", query_text)
+    terms: list[str] = []
+    for token in re.split(r"[，。；、,.!?！？\s（）()]+|未取得|情况下|对外|其中|要求|依法|进行|提供|并|和|的", normalized):
+        token = token.strip()
+        if len(token) < 2 or token.isdigit():
+            continue
+        if _is_low_value_keyword(token):
+            continue
+        terms.append(token)
+    for token in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{2,12}", normalized):
+        if len(token) < 2 or token.isdigit():
+            continue
+        if _is_low_value_keyword(token):
+            continue
+        terms.append(token)
+    deduped = []
+    seen = set()
+    for term in terms:
+        if term not in seen:
+            seen.add(term)
+            deduped.append(term)
+        if len(deduped) >= max_terms:
+            break
+    return deduped
+
+
+def _is_low_value_keyword(term: str) -> bool:
+    """过滤过于通用、对法律条文召回帮助不大的短词。"""
+
+    stop_words = {
+        "提交人",
+        "要求",
+        "部门",
+        "处理",
+        "核查",
+        "查处",
+        "北京市",
+        "北京市朝阳区",
+        "市场监管",
+        "工作人员",
+        "工单",
+        "服务",
+        "反映",
+    }
+    return term in stop_words or len(term) > 24
 
 
 def _upsert_document(
@@ -450,6 +618,7 @@ def _rerank_pg_candidates(
                 chunk_text=candidate.chunk_text,
                 embedding_model=candidate.embedding_model,
                 vector_score=candidate.vector_score,
+                keyword_score=candidate.keyword_score,
                 final_score=item.score,
                 rerank_score=item.score,
                 reranker_model=get_reranker_runtime_model(),
@@ -476,10 +645,11 @@ def _build_references(
                 excerpt=_short_excerpt(candidate.chunk_text),
                 relevance_score=round(candidate.final_score, 2),
                 reason="真实法律知识库向量检索命中该条文；已按相关性阈值过滤。",
-                retrieval_method="pgvector_rerank" if candidate.rerank_score > 0 else "pgvector",
+                retrieval_method=_retrieval_method(candidate),
                 embedding_model=candidate.embedding_model,
                 reranker_model=candidate.reranker_model,
                 vector_score=round(candidate.vector_score, 2),
+                keyword_score=round(candidate.keyword_score, 2),
                 rerank_score=round(candidate.rerank_score, 2),
                 source_id=candidate.chunk_key,
             )
@@ -493,6 +663,25 @@ def _chunk_embedding_text(chunk_text: str, law_name: str) -> str:
     """组合条文上下文，提升 embedding 对法律名称和条文内容的感知。"""
 
     return f"{law_name}\n{chunk_text}"
+
+
+def _retrieval_method(candidate: PgLegalCandidate) -> str:
+    """根据候选来源标识检索方式，便于接口结果说明是否经过混合召回和重排。"""
+
+    has_vector = candidate.vector_score > 0
+    has_keyword = candidate.keyword_score > 0
+    has_rerank = candidate.rerank_score > 0
+    if has_vector and has_keyword and has_rerank:
+        return "hybrid_vector_keyword_rerank"
+    if has_keyword and has_rerank:
+        return "keyword_rerank"
+    if has_vector and has_rerank:
+        return "pgvector_rerank"
+    if has_vector and has_keyword:
+        return "hybrid_vector_keyword"
+    if has_keyword:
+        return "keyword"
+    return "pgvector"
 
 
 def _short_excerpt(text: str, max_length: int = 180) -> str:
