@@ -6,7 +6,6 @@ from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
 from app.legal_docx_parser import _rebuild_pdf_paragraphs, parse_legal_document, parse_legal_docx
-from app.legal_pg_kb import PgLegalCandidate, _extract_keyword_terms, _merge_candidates
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
@@ -58,7 +57,7 @@ def test_list_tickets_returns_mock_data():
     response = client.get("/tickets")
 
     assert response.status_code == 200
-    assert len(response.json()) == 12
+    assert len(response.json()) == 10
 
 
 def test_process_one_classifies_complaint():
@@ -85,68 +84,10 @@ def test_process_one_returns_related_legal_references():
     assert body["legal_references"]
     assert "中华人民共和国消费者权益保护法" in law_names
     assert len(body["legal_references"]) <= 3
-    assert all(
-        item["retrieval_method"]
-        in {
-            "vector",
-            "hybrid_vector_rerank",
-            "pgvector",
-            "pgvector_rerank",
-            "keyword",
-            "keyword_rerank",
-            "hybrid_vector_keyword",
-            "hybrid_vector_keyword_rerank",
-        }
-        for item in body["legal_references"]
-    )
+    assert all(item["retrieval_method"] in {"vector", "hybrid_vector_rerank"} for item in body["legal_references"])
     assert all(item["embedding_model"] for item in body["legal_references"])
     assert all(item["source_id"] for item in body["legal_references"])
-    assert all("keyword_score" in item for item in body["legal_references"])
     assert all(item["relevance_score"] >= 0.55 for item in body["legal_references"])
-
-
-def test_keyword_terms_extract_business_license_and_food_permit_phrases():
-    """关键词召回应能从工单原文提取法律检索价值较高的短语。"""
-
-    terms = _extract_keyword_terms(
-        "托管中心在未取得营业证照和食品经营许可证的情况下，对外招收学生并提供餐饮服务。"
-    )
-
-    assert "营业证照" in terms
-    assert "食品经营许可证" in terms
-    assert "餐饮服务" in terms
-
-
-def test_merge_candidates_deduplicates_vector_and_keyword_hits():
-    """语义召回和关键词召回命中同一切片时，应去重并合并分数。"""
-
-    vector_candidate = PgLegalCandidate(
-        chunk_key="chunk-1",
-        law_name="测试法",
-        chapter="",
-        article="第一条",
-        chunk_text="测试内容",
-        embedding_model="bge-m3",
-        vector_score=0.72,
-        final_score=0.72,
-    )
-    keyword_candidate = PgLegalCandidate(
-        chunk_key="chunk-1",
-        law_name="测试法",
-        chapter="",
-        article="第一条",
-        chunk_text="测试内容",
-        embedding_model="bge-m3",
-        vector_score=0.0,
-        keyword_score=0.5,
-        final_score=0.5,
-    )
-
-    merged = _merge_candidates([vector_candidate], [keyword_candidate])
-
-    assert len(merged) == 1
-    assert merged[0].vector_score == 0.72
-    assert merged[0].keyword_score == 0.5
 
 
 def test_smart_transfer_low_confidence_keeps_manual_recommendation():

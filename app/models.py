@@ -93,7 +93,6 @@ class LegalReference(BaseModel):
     embedding_model: str = ""
     reranker_model: str = ""
     vector_score: float = 0.0
-    keyword_score: float = 0.0
     rerank_score: float = 0.0
     source_id: str = ""
 

@@ -19,11 +19,9 @@ load_dotenv()
 load_dotenv(".env.example", override=False)
 
 LEGAL_VECTOR_TOP_K = int(os.getenv("LEGAL_VECTOR_TOP_K", "10"))
-LEGAL_KEYWORD_TOP_K = int(os.getenv("LEGAL_KEYWORD_TOP_K", "10"))
 LEGAL_DISPLAY_TOP_K = int(os.getenv("LEGAL_DISPLAY_TOP_K", "3"))
 LEGAL_MIN_RELEVANCE_SCORE = float(os.getenv("LEGAL_MIN_RELEVANCE_SCORE", "0.55"))
 LEGAL_ENABLE_RERANKER = os.getenv("LEGAL_ENABLE_RERANKER", "true").lower() == "true"
-LEGAL_ENABLE_KEYWORD_SEARCH = os.getenv("LEGAL_ENABLE_KEYWORD_SEARCH", "true").lower() == "true"
 LEGAL_PREWARM_ON_STARTUP = os.getenv("LEGAL_PREWARM_ON_STARTUP", "true").lower() == "true"
 
 
@@ -136,10 +134,8 @@ def get_legal_retrieval_config_status() -> dict[str, object]:
     return {
         "backend": "postgres" if is_pg_legal_kb_configured() else "mock",
         "vector_top_k": LEGAL_VECTOR_TOP_K,
-        "keyword_top_k": LEGAL_KEYWORD_TOP_K,
         "display_top_k": LEGAL_DISPLAY_TOP_K,
         "min_relevance_score": LEGAL_MIN_RELEVANCE_SCORE,
-        "enable_keyword_search": LEGAL_ENABLE_KEYWORD_SEARCH,
         "enable_reranker": LEGAL_ENABLE_RERANKER,
         "prewarm_on_startup": LEGAL_PREWARM_ON_STARTUP,
     }
