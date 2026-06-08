@@ -63,7 +63,7 @@ MOCK_TICKETS: list[Ticket] = [
     # 明显非市场监管职责样例：夜间施工噪音通常建议退单或转其他部门。
     Ticket(
         title="反映小区夜间施工噪音扰民",
-        content="北京市朝阳区某小区附近工地连续多日夜间施工，噪音很大，影响休息，要求处理。",
+        content="北京市朝阳区桃园路附近工地连续多日夜间施工，噪音很大，影响休息，要求处理。",
         ticket_no="DEMO-TICKET-004",
         ticket_type="城市管理->噪音扰民",
         contact_phone="demo-phone-004",
@@ -159,7 +159,7 @@ MOCK_TICKETS: list[Ticket] = [
         ticket_no="DEMO-TICKET-010",
         ticket_type="民生服务->物业服务",
         contact_phone="demo-phone-010",
-        customer_name="刘先生",
+        customer_name="刘xx",
         created_at="2026-06-02 08:30:00",
         due_at="2026-06-17 18:00:00",
         region="北京市朝阳区",
@@ -167,5 +167,19 @@ MOCK_TICKETS: list[Ticket] = [
         incident_address="北京市北京市朝阳区某小区",
         appeal_purpose="要求处理收费",
     ),
+    Ticket(
+        title="举报企业长期未开业或连续停业",
+        content="提交人反映，北京市北京市朝阳区某商业楼内的某企业管理有限公司自登记成立后，长期未实际开展经营活动，涉嫌成立后无正当理由超过六个月未开业；另据周边商户反映，该单位即使曾短暂开业，也已自行停业连续六个月以上。提交人要求市场监管部门依法核查该单位经营状态，并对涉嫌违法行为进行查处。",
+        ticket_no="DEMO-TICKET-011",
+        ticket_type="市场监管->企业监管",
+        contact_phone="demo-phone-002",
+        customer_name="张先生",
+        created_at="2026-06-08 09:00:00",
+        due_at="2026-06-23 18:00:00",
+        region="北京市朝阳区",
+        incident_at="2026-06-08 08:50:00",
+        incident_address="北京市北京市朝阳区南大街某商业楼",
+        appeal_purpose="要求依法核查并查处长期未开业或连续停业行为",
+    )
 ]
 """模拟接口返回的工单列表，覆盖投诉、举报、无法判断、未知辖区、退单、字段缺失和职业索赔风险。"""
