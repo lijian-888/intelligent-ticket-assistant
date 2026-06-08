@@ -57,7 +57,7 @@ def test_list_tickets_returns_mock_data():
     response = client.get("/tickets")
 
     assert response.status_code == 200
-    assert len(response.json()) == 12
+    assert len(response.json()) == 13
 
 
 def test_process_one_classifies_complaint():
