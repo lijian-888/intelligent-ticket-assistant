@@ -37,7 +37,7 @@ def is_llm_configured() -> bool:
 
 
 def get_llm_config_status() -> dict[str, Any]:
-    """返回脱敏后的大模型配置状态，方便排查自有环境连接问题。"""
+    """返回脱敏后的大模型配置状态，方便排查模型服务连接问题。"""
 
     return {
         "configured": is_llm_configured(),

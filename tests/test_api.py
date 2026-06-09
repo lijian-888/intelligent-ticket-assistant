@@ -69,7 +69,7 @@ def test_process_one_classifies_complaint():
     assert response.status_code == 200
     assert body["structured"]["case_nature"] == "投诉"
     assert body["status"] == "待流转"
-    assert body["recommended_branch"] == "北京市朝阳区市场监督管理部门建国路承办单位"
+    assert body["recommended_branch"] == "北京市朝阳区市场监督管理部门"
     assert body["actions"][0]["tool"] == "transfer_ticket"
 
 
@@ -239,16 +239,16 @@ def test_ambiguous_ticket_can_be_unknown_case_nature():
     assert "人工复核" in body["return_reason"]
 
 
-def test_non_national_region_cannot_recommend_branch():
-    """全国不同地区样例：当前 demo 只处理北京市朝阳区工单，不能推荐建议承办单位。"""
+def test_national_region_can_recommend_local_authority():
+    """全国范围样例：不同地区的市场监管工单也应给出承办单位建议。"""
 
     response = client.post("/tickets/DEMO-TICKET-008/process")
     body = response.json()
 
     assert response.status_code == 200
-    assert body["recommended_branch"] == ""
+    assert body["recommended_branch"] == "陕西省西安市雁塔区市场监督管理部门"
     assert body["jurisdiction"] == "市场监管职责范围"
-    assert body["status"] == "建议退单"
+    assert body["status"] == "待流转"
 
 
 def test_report_with_insufficient_object_and_address_needs_review():
@@ -748,7 +748,7 @@ def test_llm_can_infer_missing_required_fields(monkeypatch):
             return {
                 "inferred_fields": [
                     {"field": "contact_phone", "value": "demo-phone-from-text", "confidence": 0.9, "reason": "正文提及手机号"},
-                    {"field": "incident_address", "value": "北京市北京市朝阳区", "confidence": 0.9, "reason": "正文提及地址"},
+                    {"field": "incident_address", "value": "北京市朝阳区", "confidence": 0.9, "reason": "正文提及地址"},
                     {"field": "region", "value": "北京市朝阳区", "confidence": 0.9, "reason": "由地址归纳"},
                 ]
             }

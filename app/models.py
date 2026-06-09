@@ -23,7 +23,7 @@ class TicketStatus(str, Enum):
 
 
 class Ticket(BaseModel):
-    """原始工单数据模型，字段尽量贴近市监工单详情页展示内容。"""
+    """原始工单数据模型，字段尽量贴近市场监管工单详情页展示内容。"""
 
     title: str
     content: str
