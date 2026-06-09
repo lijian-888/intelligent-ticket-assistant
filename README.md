@@ -1,8 +1,8 @@
-﻿# 市场监管投诉举报工单智能处理 Demo
+﻿# 投诉举报工单智能处理 Demo
 
-本项目是一个面向市场监督管理部门投诉、举报工单的智能处理 Demo。系统通过 FastAPI 提供接口，通过 LangGraph 编排工单处理流程，并结合本地或自有模型服务、embedding 模型、reranker 模型、PostgreSQL + pgvector 法律知识库，实现工单结构化、投诉举报识别、核心字段校验、退单建议、属地承办单位建议、情绪分析、职业索赔风险识别、法律条款检索和智能流转模拟。
+本项目是一个面向管理部门投诉、举报工单的智能处理 Demo。系统通过 FastAPI 提供接口，通过 LangGraph 编排工单处理流程，并结合本地或自有模型服务、embedding 模型、reranker 模型、PostgreSQL + pgvector 法律知识库，实现工单结构化、投诉举报识别、核心字段校验、退单建议、属地承办单位建议、情绪分析、职业索赔风险识别、法律条款检索和智能流转模拟。
 
-当前项目主要用于公开演示和技术介绍，目的是模拟市场监管投诉举报工单系统如何接入智能体能力。Demo 阶段不会真实调用任何政务或业务系统接口，流转、退单、写回补充任务均为模拟动作。
+当前项目主要用于公开演示和技术介绍，目的是模拟投诉举报工单系统如何接入智能体能力。Demo 阶段不会真实调用任何政务或业务系统接口，流转、退单、写回补充任务均为模拟动作。
 
 ## 主要能力
 
@@ -26,7 +26,7 @@
 
 以下能力属于后续真实接入方向，当前公开 Demo 未包含真实账号、密钥、接口调用或外部服务依赖：
 
-1. 智能联络中心（Artificial Intelligence Cloud Call Service）自动补充工单信息：智能联络中心是阿里云整合语音通信能力、语言大模型能力为企业打造的高效联络中心系统，助力企业通过语音通话快捷高效地联络用户。系统可定时扫描补充工单数据库，识别需要补充核心字段的工单，通过自动外呼向提交人询问工单详情，再将采集到的补充内容作为结构化结果写回工单系统，实现补充工单的信息补全。公开仓库不包含真实外呼号码、录音、话术配置、阿里云访问密钥或业务系统写回接口。<https://help.aliyun.com/zh/aiccs/product-overview/what-is-artificial-intelligence-cloud-call-service?spm=a2c4g.11186623.help-menu-126730.d_0_0_0.75e9166aytmX8K>
+1. 智能联络中心-自动补充工单信息：智能联络中心是阿里云整合语音通信能力、语言大模型能力为企业打造的高效联络中心系统，助力企业通过语音通话快捷高效地联络用户。系统可定时扫描补充工单数据库，识别需要补充核心字段的工单，通过自动外呼向提交人询问工单详情，再将采集到的补充内容作为结构化结果写回工单系统，实现补充工单的信息补全。公开仓库不包含真实外呼号码、录音、话术配置、阿里云访问密钥或业务系统写回接口。<https://help.aliyun.com/zh/aiccs/product-overview/what-is-artificial-intelligence-cloud-call-service?spm=a2c4g.11186623.help-menu-126730.d_0_0_0.75e9166aytmX8K>
 2. 腾讯地图智能地址解析：可根据工单中提交的地址调用腾讯位置服务智能地址解析 API，获取标准化省、市、区县以及乡镇/街道信息，再结合属地路由规则判断工单应流转到对应的市场监管承办单位。公开 Demo 目前仅使用泛化规则模拟该过程，不包含腾讯地图 Key 或真实调用结果。<https://lbs.qq.com/service/webService/webServiceGuide/address/SmartGeocoder>
 
 ## 技术栈
@@ -144,21 +144,6 @@ AUTO_TRANSFER_CONFIDENCE_THRESHOLD=0.85
   -> 返回最多 LEGAL_DISPLAY_TOP_K 条
 ```
 
-向量分数计算：
-
-```sql
-1 - (embedding <=> query_vector) AS vector_score
-```
-
-其中 `<=>` 是 pgvector 的 cosine distance。
-
-重排分数来自 reranker 接口返回值。代码会读取：
-
-```text
-relevance_score / score / similarity
-```
-
-如果返回分数不在 0 到 1 之间，会用 sigmoid 归一化。
 
 ## 配置说明
 
@@ -200,12 +185,6 @@ LEGAL_ENABLE_RERANKER=true
 LEGAL_PREWARM_ON_STARTUP=true
 ```
 
-注意：
-
-- `.env` 不应提交到 Git。
-- `LLM_BASE_URL`、`EMBEDDING_BASE_URL`、`RERANKER_BASE_URL` 均按 OpenAI-compatible 风格配置。
-- 如果 `EMBEDDING_BASE_URL` 不是以 `/v1` 结尾，代码会自动请求 `/v1/embeddings`。
-- 如果 `RERANKER_BASE_URL` 不是以 `/v1` 结尾，代码会先尝试 `/v1/rerank`，再尝试 `/rerank`。
 
 ## 安装依赖
 
@@ -224,7 +203,7 @@ python -m venv .venv
 
 ## 启动项目
 
-### 方式一：PyCharm 启动
+### 方式：PyCharm 启动
 
 运行：
 
@@ -235,33 +214,9 @@ main.py
 默认端口：
 
 ```text
-http://127.0.0.1:8000
+http://127.0.0.1:8020
 ```
 
-### 方式二：命令行启动 8020 端口
-
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8020
-```
-
-访问：
-
-```text
-http://127.0.0.1:8020/demo/
-```
-
-### 杀掉旧的 8020 进程
-
-如果页面没有刷新出最新 mock 工单，通常是旧进程还在。可以执行：
-
-```powershell
-$listeners = Get-NetTCPConnection -LocalPort 8020 -State Listen -ErrorAction SilentlyContinue
-foreach ($conn in $listeners) {
-  Stop-Process -Id $conn.OwningProcess -Force
-}
-```
-
-然后重新启动服务。
 
 ## 前端页面
 
@@ -421,64 +376,3 @@ GET /legal-kb/chunks?source_file=食品安全
 - 托管中心无证经营和食品经营许可举报
 - 企业登记提交虚假住所材料举报
 
-## 版本管理和回退
-
-本项目使用 Git 管理版本，并使用中文 tag 方便演示回退。
-
-查看历史：
-
-```powershell
-git log --oneline --decorate
-```
-
-推荐回退方式：
-
-```powershell
-git revert 提交ID
-```
-
-这会生成一个新的撤销提交，保留历史，适合日常演示和协作。
-
-不建议随意使用：
-
-```powershell
-git reset --hard 提交ID
-```
-
-它会直接重置当前分支，可能丢掉后续提交。
-
-如果只想基于旧版本开一个测试分支：
-
-```powershell
-git checkout -b 回退测试分支 v0.1.23_新增托管中心无证餐饮举报案例
-```
-
-PyCharm 中推荐：
-
-```text
-Git Log -> 右键某个提交 -> Revert Commit
-```
-
-## 公开发布注意事项
-
-本仓库面向 GitHub 公开展示时，应按演示项目处理：
-
-- 不提交真实 API Key、真实模型地址、数据库连接串或业务系统接口地址。
-- `.env` 只在本地或部署环境维护，仓库仅保留 `.env.example` 占位配置。
-- mock 工单必须使用虚构编号、虚构联系人、虚构地址和泛化组织名称。
-- Demo 页面和接口只做模拟流转、模拟退单、模拟写回，不连接任何真实政务或业务系统。
-- 法律条款检索结果只作为办理参考，不构成法律意见或行政决定依据。
-- LLM 输出必须保留 schema 校验、置信度阈值和审计信息。
-- 退单动作必须人工确认，不应完全自动化。
-- 自动流转前要记录模型输出、置信度、prompt 版本、处理时间和最终动作。
-- 接入真实系统前，应重新设计身份认证、权限控制、日志留存、数据脱敏和失败重试机制。
-- 法律知识库应建立来源、版本、审核和更新机制，避免使用来源不明或授权不清的文件。
-
-## 后续建议
-
-- 为 PostgreSQL 向量字段增加 HNSW 或 IVFFLAT 索引，提升大量法规切片下的检索性能。
-- 完善法规知识库的版本管理和增量导入。
-- 优化 PDF 条文重组和异常切片清洗。
-- 对 reranker 分数做更明确的展示解释，避免工作人员误解为概率。
-- 将 LLM prompt 版本和 audit_id 持久化，满足审计要求。
-- 接入真实工单系统前，先设计接口字段映射和失败重试机制。
