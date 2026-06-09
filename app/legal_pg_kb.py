@@ -11,6 +11,7 @@ from dotenv import dotenv_values, load_dotenv
 from app.embedding_client import embed_texts, get_embedding_runtime_model
 from app.legal_docx_parser import ParsedLegalDocument, parse_legal_docx_directory
 from app.models import LegalReference
+from app.redaction import redact_sensitive_text
 from app.reranker_client import get_reranker_runtime_model, rerank_documents
 
 
@@ -89,7 +90,7 @@ def get_pg_legal_kb_status() -> dict[str, Any]:
                 status["embedding_models"] = [row[0] for row in cursor.fetchall()]
         return status
     except Exception as exc:
-        status["last_error"] = f"{type(exc).__name__}: {exc}"
+        status["last_error"] = redact_sensitive_text(f"{type(exc).__name__}: {exc}")
         return status
 
 

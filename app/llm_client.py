@@ -8,6 +8,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from app.redaction import mask_config_value, redact_sensitive_text
+
 
 load_dotenv()
 load_dotenv(".env.example", override=False)
@@ -39,7 +41,8 @@ def get_llm_config_status() -> dict[str, Any]:
 
     return {
         "configured": is_llm_configured(),
-        "base_url": LLM_BASE_URL,
+        "base_url": mask_config_value(LLM_BASE_URL),
+        "base_url_set": bool(LLM_BASE_URL),
         "model": LLM_MODEL,
         "timeout_seconds": LLM_TIMEOUT_SECONDS,
         "classify_timeout_seconds": LLM_CLASSIFY_TIMEOUT_SECONDS,
@@ -130,3 +133,9 @@ def call_llm_json(
     if isinstance(content, dict):
         return content
     return json.loads(content)
+
+
+def redact_llm_error(exc: Exception) -> str:
+    """Format an exception without exposing model service endpoint details."""
+
+    return redact_sensitive_text(f"{type(exc).__name__}: {exc}")

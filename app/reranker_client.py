@@ -8,6 +8,8 @@ from typing import Any
 import requests
 from dotenv import dotenv_values, load_dotenv
 
+from app.redaction import mask_config_value, redact_sensitive_text
+
 
 load_dotenv()
 load_dotenv(".env.example", override=False)
@@ -50,12 +52,13 @@ def get_reranker_config_status() -> dict[str, Any]:
     config = _read_reranker_config()
     return {
         "configured": is_reranker_configured(),
-        "base_url": config.base_url,
+        "base_url": mask_config_value(config.base_url),
+        "base_url_set": bool(config.base_url),
         "model": config.model,
         "timeout_seconds": config.timeout_seconds,
         "api_key_set": bool(config.api_key),
         "last_reranker_source": _LAST_RERANKER_SOURCE,
-        "last_error": _LAST_RERANKER_ERROR,
+        "last_error": redact_sensitive_text(_LAST_RERANKER_ERROR),
     }
 
 
@@ -81,7 +84,7 @@ def rerank_documents(query: str, documents: list[str], top_n: int) -> list[Reran
         return results
     except Exception as exc:
         _LAST_RERANKER_SOURCE = "fallback_vector_score"
-        _LAST_RERANKER_ERROR = f"{type(exc).__name__}: {exc}"
+        _LAST_RERANKER_ERROR = redact_sensitive_text(f"{type(exc).__name__}: {exc}")
         return []
 
 

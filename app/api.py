@@ -16,7 +16,7 @@ from app.graph import process_ticket, process_ticket_steps
 from app.legal_docx_parser import parse_legal_docx_directory
 from app.legal_kb import get_legal_retrieval_config_status, prewarm_legal_vector_index
 from app.legal_pg_kb import get_pg_legal_kb_status, import_legal_docx_directory, list_legal_chunks_from_pg
-from app.llm_client import get_llm_config_status, ping_llm
+from app.llm_client import get_llm_config_status, ping_llm, redact_llm_error
 from app.mock_data import MOCK_TICKETS
 from app.models import ProcessingResult, SupplementTask, Ticket
 from app.reranker_client import get_reranker_config_status
@@ -187,7 +187,7 @@ def create_app() -> FastAPI:
         except Exception as exc:
             return {
                 "ok": False,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": redact_llm_error(exc),
                 "config": get_llm_config_status(),
             }
 

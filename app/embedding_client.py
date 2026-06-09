@@ -8,6 +8,8 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+from app.redaction import mask_config_value, redact_sensitive_text
+
 
 load_dotenv()
 load_dotenv(".env.example", override=False)
@@ -32,13 +34,14 @@ def get_embedding_config_status() -> dict[str, Any]:
 
     return {
         "configured": is_embedding_configured(),
-        "base_url": EMBEDDING_BASE_URL,
+        "base_url": mask_config_value(EMBEDDING_BASE_URL),
+        "base_url_set": bool(EMBEDDING_BASE_URL),
         "model": EMBEDDING_MODEL,
         "timeout_seconds": EMBEDDING_TIMEOUT_SECONDS,
         "api_key_set": bool(EMBEDDING_API_KEY),
         "fallback_dimension": EMBEDDING_FALLBACK_DIMENSION,
         "last_embedding_source": _LAST_EMBEDDING_SOURCE,
-        "last_error": _LAST_EMBEDDING_ERROR,
+        "last_error": redact_sensitive_text(_LAST_EMBEDDING_ERROR),
     }
 
 
@@ -64,7 +67,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
             return vectors
         except Exception as exc:
             _LAST_EMBEDDING_SOURCE = "fallback"
-            _LAST_EMBEDDING_ERROR = f"{type(exc).__name__}: {exc}"
+            _LAST_EMBEDDING_ERROR = redact_sensitive_text(f"{type(exc).__name__}: {exc}")
             return [_embed_text_fallback(text) for text in texts]
     _LAST_EMBEDDING_SOURCE = "fallback"
     _LAST_EMBEDDING_ERROR = ""

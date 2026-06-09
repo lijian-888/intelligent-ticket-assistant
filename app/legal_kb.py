@@ -181,10 +181,11 @@ def retrieve_legal_references(ticket: Ticket, structured: StructuredTicket, limi
             min_relevance_score=LEGAL_MIN_RELEVANCE_SCORE,
             enable_reranker=LEGAL_ENABLE_RERANKER,
         )
+    normalized_query = "".join(query_text.split())
     query_vector = embed_texts([query_text])[0]
     query_model = get_embedding_runtime_model()
     scored = [
-        (entry, cosine_similarity(query_vector, entry.vector))
+        (entry, max(cosine_similarity(query_vector, entry.vector), _keyword_overlap_score(normalized_query, entry.article)))
         for entry in _get_vector_index(query_model)
     ]
     vector_candidates = [
@@ -280,3 +281,16 @@ def _build_reference_reason(article: LegalArticle, candidate: LegalCandidate) ->
     if candidate.rerank_score > 0:
         return f"{article.reason_template}已经过 reranker 重排确认。"
     return article.reason_template
+
+
+def _keyword_overlap_score(normalized_query: str, article: LegalArticle) -> float:
+    """Give mock retrieval stable demo behavior when no real vector service is configured."""
+
+    keywords = [
+        keyword
+        for keyword in article.retrieval_text.split()
+        if len(keyword) >= 2 and keyword in normalized_query
+    ]
+    if not keywords:
+        return 0.0
+    return min(0.95, 0.5 + len(set(keywords)) * 0.08)

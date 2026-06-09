@@ -1,4 +1,4 @@
-"""Mock ticket data used before the real ticket system API is available."""
+﻿"""Mock ticket data used before the real ticket system API is available."""
 
 from app.models import Ticket
 
@@ -172,7 +172,7 @@ MOCK_TICKETS: list[Ticket] = [
         content="提交人反映，北京市北京市朝阳区某商业楼内的某企业管理有限公司自登记成立后，长期未实际开展经营活动，涉嫌成立后无正当理由超过六个月未开业；另据周边商户反映，该单位即使曾短暂开业，也已自行停业连续六个月以上。提交人要求市场监管部门依法核查该单位经营状态，并对涉嫌违法行为进行查处。",
         ticket_no="DEMO-TICKET-011",
         ticket_type="市场监管->企业监管",
-        contact_phone="demo-phone-002",
+        contact_phone="demo-phone-011",
         customer_name="张先生",
         created_at="2026-06-08 09:00:00",
         due_at="2026-06-23 18:00:00",
