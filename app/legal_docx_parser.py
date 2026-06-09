@@ -15,6 +15,7 @@ from zipfile import ZipFile
 
 ARTICLE_PATTERN = re.compile(r"^第[一二三四五六七八九十百千万零〇两]+条")
 CHAPTER_PATTERN = re.compile(r"^第[一二三四五六七八九十百千万零〇两]+章")
+DECISION_SECTION_PATTERN = re.compile(r"^[一二三四五六七八九十百千万零〇两]+、")
 LAW_TITLE_PATTERN = re.compile(r"^中华人民共和国.+(?:法|条例|规定|办法|决定)$")
 
 
@@ -75,7 +76,9 @@ def _build_parsed_document(path: Path, paragraphs: list[str]) -> ParsedLegalDocu
     law_name = paragraphs[0].strip()
     revision_note = paragraphs[1].strip() if len(paragraphs) > 1 and paragraphs[1].startswith("（") else ""
     document_key = _stable_key(str(path.resolve()), law_name)
-    chunks = _split_articles(paragraphs, law_name, str(path))
+    chunks = _split_decision_sections(paragraphs, law_name, str(path))
+    if not chunks:
+        chunks = _split_articles(paragraphs, law_name, str(path))
     if not chunks:
         chunks = _split_paragraph_chunks(paragraphs, law_name, str(path))
     return ParsedLegalDocument(
@@ -445,6 +448,56 @@ def _skip_catalog(paragraphs: list[str]) -> list[str]:
                     return paragraphs[:catalog_index] + paragraphs[body_index:]
             return paragraphs[:catalog_index] + paragraphs[index:]
     return paragraphs
+
+
+def _split_decision_sections(paragraphs: list[str], law_name: str, source_file: str) -> list[ParsedLegalChunk]:
+    """决定类文件或国令第777号优先按“一、二、三、”编号切分。"""
+
+    if not _should_split_by_decision_sections(law_name, source_file):
+        return []
+
+    chunks: list[ParsedLegalChunk] = []
+    current_section = ""
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        if not current_section or not current_lines:
+            return
+        sequence = len(chunks) + 1
+        chunk_text = "\n".join(current_lines).strip()
+        chunks.append(
+            ParsedLegalChunk(
+                chunk_key=_stable_key(source_file, current_section, chunk_text),
+                law_name=law_name,
+                chapter="",
+                article=current_section,
+                chunk_text=chunk_text,
+                source_file=source_file,
+                sequence=sequence,
+            )
+        )
+
+    for text in _skip_catalog(paragraphs):
+        if text == law_name or text.startswith("（"):
+            continue
+        match = DECISION_SECTION_PATTERN.match(text)
+        if match:
+            flush()
+            current_section = match.group(0).rstrip("、")
+            current_lines = [text]
+            continue
+        if current_section:
+            current_lines.append(text)
+
+    flush()
+    return chunks
+
+
+def _should_split_by_decision_sections(law_name: str, source_file: str) -> bool:
+    """限定“一、二、三、”切分只用于决定类文件和国令第777号。"""
+
+    source_name = Path(source_file).name
+    return "决定" in law_name or "决定" in source_name or "国令第777号" in source_name
 
 
 def _split_paragraph_chunks(

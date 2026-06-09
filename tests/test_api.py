@@ -504,7 +504,7 @@ def test_clean_legal_filename_removes_number_or_x_prefix():
 
 
 def test_parse_legal_docx_falls_back_for_decision_documents(tmp_path):
-    """没有条文编号的决定类文件应按段落兜底切分，避免入库时丢失。"""
+    """没有条文编号的决定类文件应按“一、二、三、”切分。"""
 
     docx_path = tmp_path / "测试决定.docx"
     _write_minimal_docx(
@@ -513,15 +513,39 @@ def test_parse_legal_docx_falls_back_for_decision_documents(tmp_path):
             "全国人民代表大会常务委员会关于测试事项的决定",
             "为了测试没有条文编号的法规文件，作出如下决定。",
             "一、加强市场监管相关工作。",
+            "本部分引用第一条、第二条作为背景，不应按条文编号切分。",
             "二、依法处理投诉举报事项。",
         ],
     )
 
     document = parse_legal_docx(docx_path)
 
-    assert len(document.chunks) >= 1
-    assert document.chunks[0].article == "全文片段1"
+    assert [chunk.article for chunk in document.chunks] == ["一", "二"]
+    assert "本部分引用第一条、第二条作为背景" in document.chunks[0].chunk_text
+    assert document.chunks[1].chunk_text == "二、依法处理投诉举报事项。"
     assert "投诉举报事项" in "\n".join(chunk.chunk_text for chunk in document.chunks)
+
+
+def test_parse_legal_docx_splits_state_council_order_777_by_sections(tmp_path):
+    """国令第777号没有条文编号时，也应按“一、二、三、”切分。"""
+
+    docx_path = tmp_path / "国令第777号-2024年03月15日.docx"
+    _write_minimal_docx(
+        docx_path,
+        [
+            "国务院关于测试事项的命令",
+            "现公布如下内容。",
+            "一、调整市场主体登记事项。",
+            "登记机关应当依法处理。",
+            "二、加强企业信用监管。",
+        ],
+    )
+
+    document = parse_legal_docx(docx_path)
+
+    assert [chunk.article for chunk in document.chunks] == ["一", "二"]
+    assert "登记机关应当依法处理" in document.chunks[0].chunk_text
+    assert document.chunks[1].chunk_text == "二、加强企业信用监管。"
 
 
 def test_parse_legal_pdf_extracts_text(tmp_path):
