@@ -5,7 +5,7 @@ from zipfile import ZipFile
 from app.api import create_app
 from app.db import get_connection, init_db
 from app.embedding_client import embed_texts, get_embedding_config_status, get_embedding_runtime_model
-from app.legal_docx_parser import _rebuild_pdf_paragraphs, parse_legal_document, parse_legal_docx
+from app.legal_docx_parser import _rebuild_pdf_paragraphs, parse_legal_document, parse_legal_docx, parse_legal_docx_directory
 from app.models import CaseNature, ProcessingResult, StructuredTicket, Ticket, TicketStatus
 from app.nodes import analyze_emotion, assess_professional_claimant, classify_case_nature, classify_case_nature_detail
 from app.reranker_client import _parse_rerank_response
@@ -492,6 +492,18 @@ def test_parse_legal_docx_splits_articles(tmp_path):
     assert document.chunks[0].article == "第一条"
     assert "目录" not in document.chunks[0].chunk_text
     assert "投诉举报处理" in document.chunks[1].chunk_text
+
+
+def test_parse_legal_docx_directory_skips_office_temp_files(tmp_path):
+    """批量导入法规目录时应跳过 ~$ 开头的 Office 临时文件。"""
+
+    _write_minimal_docx(tmp_path / "测试法规.docx", ["测试法规", "第一条　正文。"])
+    (tmp_path / "~$测试法规.docx").write_text("not a real docx", encoding="utf-8")
+
+    documents = parse_legal_docx_directory(tmp_path)
+
+    assert len(documents) == 1
+    assert documents[0].law_name == "测试法规"
 
 
 def test_clean_legal_filename_removes_number_or_x_prefix():

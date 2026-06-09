@@ -95,9 +95,19 @@ def parse_legal_docx_directory(directory: Path) -> list[ParsedLegalDocument]:
 
     documents = []
     for path in sorted(directory.rglob("*")):
-        if path.is_file() and path.suffix.lower() in SUPPORTED_LEGAL_EXTENSIONS:
+        if _is_supported_legal_file(path):
             documents.append(parse_legal_document(path))
     return documents
+
+
+def _is_supported_legal_file(path: Path) -> bool:
+    """判断是否是可导入的法规文件，跳过 Office 临时锁文件等非正文文件。"""
+
+    if not path.is_file():
+        return False
+    if path.name.startswith("~$"):
+        return False
+    return path.suffix.lower() in SUPPORTED_LEGAL_EXTENSIONS
 
 
 def _read_docx_paragraphs(path: Path) -> list[str]:
