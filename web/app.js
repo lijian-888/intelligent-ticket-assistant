@@ -8,6 +8,10 @@ const AI_RESULT_CACHE_VERSION = "20260604-reranker-v1";
 const els = {
   rows: document.getElementById("ticketRows"),
   ticketCount: document.getElementById("ticketCount"),
+  summaryTotal: document.getElementById("summaryTotal"),
+  summaryTransfer: document.getElementById("summaryTransfer"),
+  summarySupplement: document.getElementById("summarySupplement"),
+  summaryReturn: document.getElementById("summaryReturn"),
   legalKbBtn: document.getElementById("legalKbBtn"),
   supplementTasksBtn: document.getElementById("supplementTasksBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -46,6 +50,7 @@ async function loadTickets() {
 
 function renderTickets() {
   els.ticketCount.textContent = `${state.tickets.length} 条`;
+  renderSummary();
   els.rows.innerHTML = state.tickets
     .map((ticket, index) => {
       const result = state.results.get(ticket.ticket_no);
@@ -84,6 +89,17 @@ function renderTickets() {
         </tr>`;
     })
     .join("");
+}
+
+function renderSummary() {
+  const results = Array.from(state.results.values());
+  const transferCount = results.filter((result) => resultStatusLabel(result) === "待流转" || resultStatusLabel(result) === "已流转").length;
+  const supplementCount = results.filter((result) => resultStatusLabel(result) === "待补充" || resultStatusLabel(result) === "已加入补充任务").length;
+  const returnCount = results.filter((result) => resultStatusLabel(result) === "建议退单" || resultStatusLabel(result) === "已退单").length;
+  if (els.summaryTotal) els.summaryTotal.textContent = state.tickets.length;
+  if (els.summaryTransfer) els.summaryTransfer.textContent = transferCount;
+  if (els.summarySupplement) els.summarySupplement.textContent = supplementCount;
+  if (els.summaryReturn) els.summaryReturn.textContent = returnCount;
 }
 
 function goDetail(ticketNo) {
