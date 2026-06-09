@@ -75,6 +75,330 @@
 - bge-reranker-v2-m3，用作 reranker 模型
 - OpenAI-compatible LLM API，用作工单分类、退单预检、字段推断、情绪分析、职业索赔风险识别和整体复核
 
+## 真实能力接入总览
+
+要把本 Demo 跑成一个可接入真实模型和真实法律知识库的智能体，需要准备四类能力：
+
+1. PostgreSQL + pgvector：保存法规文档切片和向量。
+2. embedding 模型服务：把法规条文和工单内容转成向量，本项目默认使用 `bge-m3`。
+3. reranker 模型服务：对向量召回的候选条文重排，本项目默认使用 `bge-reranker-v2-m3`。
+4. OpenAI-compatible LLM 服务：执行投诉/举报识别、核心字段推断、情绪分析、职业索赔风险识别、退单预检和整体复核。
+
+项目所有真实服务配置都写在项目根目录的 `.env` 文件中。不要把真实 `.env` 提交到 GitHub。
+
+### 1. 进入项目目录
+
+以下命令均在 Windows PowerShell 中运行：
+
+```powershell
+cd D:\IDEA-Project\intelligent-ticket-assistant
+```
+
+### 2. 创建 Python 环境并安装依赖
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+如果已经存在 `.venv`，只需要执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 3. 启动 PostgreSQL + pgvector
+
+推荐使用 Docker，因为 pgvector 扩展已经打包在镜像中。
+
+在任意 PowerShell 窗口运行：
+
+```powershell
+docker volume create ticket_pgvector_data
+
+docker run --name ticket-pgvector `
+  -e POSTGRES_USER=ticket `
+  -e POSTGRES_PASSWORD=ticket_password_please_change `
+  -e POSTGRES_DB=ticket_kb `
+  -p 5432:5432 `
+  -v ticket_pgvector_data:/var/lib/postgresql/data `
+  -d pgvector/pgvector:pg16
+```
+
+初始化 pgvector 扩展：
+
+```powershell
+docker exec -it ticket-pgvector psql -U ticket -d ticket_kb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+docker exec -it ticket-pgvector psql -U ticket -d ticket_kb -c "\dx vector"
+```
+
+如果你已经有 PostgreSQL，并且已经安装 pgvector 扩展，也可以手动创建数据库：
+
+```powershell
+psql -U postgres -c "CREATE DATABASE ticket_kb;"
+psql -U postgres -d ticket_kb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+本项目首次连接知识库时会自动创建以下表：
+
+- `legal_documents`：法规文档元数据。
+- `legal_chunks`：法规切片、embedding 向量、来源文件、条号、章节等。
+
+### 4. 配置模型和知识库连接
+
+复制配置模板：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+在 `.env` 中填写真实服务地址、模型名和数据库连接。示例：
+
+```env
+# OpenAI-compatible LLM。可以填写到 /v1，也可以填写服务根地址，代码会自动拼接 /v1/chat/completions。
+LLM_BASE_URL=http://127.0.0.1:8010/v1
+LLM_API_KEY=replace-with-your-real-key
+LLM_MODEL=your-chat-model
+LLM_TIMEOUT_SECONDS=60
+LLM_CLASSIFY_TIMEOUT_SECONDS=45
+LLM_FIELD_INFER_TIMEOUT_SECONDS=45
+LLM_REVIEW_TIMEOUT_SECONDS=120
+LLM_CONFIDENCE_THRESHOLD=0.75
+LLM_ENABLE_REVIEW=true
+
+# OpenAI-compatible embeddings。代码调用 /v1/embeddings。
+EMBEDDING_BASE_URL=http://127.0.0.1:8011/v1
+EMBEDDING_API_KEY=replace-with-your-real-key-or-empty
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_TIMEOUT_SECONDS=30
+
+# reranker。代码优先调用 /v1/rerank，也兼容 /rerank。
+RERANKER_BASE_URL=http://127.0.0.1:8012/v1
+RERANKER_API_KEY=replace-with-your-real-key-or-empty
+RERANKER_MODEL=bge-reranker-v2-m3
+RERANKER_TIMEOUT_SECONDS=30
+
+# PostgreSQL + pgvector 法律知识库。
+LEGAL_KB_BACKEND=postgres
+LEGAL_DATABASE_URL=postgresql://ticket:ticket_password_please_change@127.0.0.1:5432/ticket_kb
+LEGAL_IMPORT_BATCH_SIZE=16
+LEGAL_VECTOR_TOP_K=10
+LEGAL_DISPLAY_TOP_K=3
+LEGAL_MIN_RELEVANCE_SCORE=0.55
+LEGAL_ENABLE_RERANKER=true
+LEGAL_PREWARM_ON_STARTUP=true
+
+# 自动化动作阈值。
+AUTO_SUPPLEMENT_CONFIDENCE_THRESHOLD=0.80
+AUTO_TRANSFER_CONFIDENCE_THRESHOLD=0.85
+```
+
+模型接口要求：
+
+- LLM 服务需要兼容 OpenAI `POST /v1/chat/completions`，并支持 JSON 输出。
+- embedding 服务需要兼容 OpenAI `POST /v1/embeddings`，返回 `data[index].embedding`。
+- reranker 服务需要支持 `POST /v1/rerank` 或 `POST /rerank`，入参为 `model`、`query`、`documents`、`top_n`。
+
+如果没有配置 `LLM_BASE_URL` 或 `LLM_API_KEY`，系统会使用规则兜底，情绪分析、职业索赔风险、字段推断等 LLM 能力会降级。  
+如果没有配置 `EMBEDDING_BASE_URL`，系统会使用本地确定性向量兜底，只适合 Demo，不适合真实检索。真实知识库必须配置 embedding 服务后再导入。
+
+### 5. 准备法规文件
+
+把法规、规章、规范性文件放入项目根目录的 `legalDocx/`：
+
+```text
+legalDocx/
+  中华人民共和国消费者权益保护法.docx
+  中华人民共和国食品安全法.docx
+  ...
+```
+
+支持文件类型：
+
+- `.docx`
+- `.doc`
+- `.pdf`
+
+注意：
+
+- `.pdf` 只支持可复制文本型 PDF，不做 OCR。
+- `.doc` 需要安装 LibreOffice 用于转换为 `.docx`。
+- 如果 LibreOffice 没有加入系统 PATH，需要在 `.env` 中配置：
+
+```env
+LIBREOFFICE_PATH=C:\Program Files\LibreOffice\program\soffice.exe
+```
+
+### 6. 预览法规切片
+
+先启动服务：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+打开浏览器查看切片预览：
+
+```text
+http://127.0.0.1:8000/demo/legal-kb.html
+```
+
+也可以直接调用接口：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/preview?path=legalDocx&limit=20" -Method Get
+```
+
+切片规则：
+
+- 普通法律、条例、办法优先按“第几条”切分。
+- 决定类文件优先按“一、二、三、”切分。
+- 无法识别条文结构时按段落兜底切分。
+
+### 7. 导入法规到 PostgreSQL + pgvector
+
+确认 `.env` 已配置：
+
+- `LEGAL_DATABASE_URL`
+- `EMBEDDING_BASE_URL`
+- `EMBEDDING_MODEL`
+
+在项目根目录运行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\import_legal_docs.py --path legalDocx --rebuild
+```
+
+导入脚本会执行：
+
+1. 读取 `legalDocx/` 下的 `.docx`、`.doc`、`.pdf`。
+2. 解析法规名称、章节、条号和正文。
+3. 按条文或段落切片。
+4. 调用 `EMBEDDING_BASE_URL` 的 `/v1/embeddings` 生成向量。
+5. 写入 PostgreSQL 的 `legal_documents` 和 `legal_chunks` 表。
+
+成功后会输出类似：
+
+```json
+{
+  "document_count": 9,
+  "chunk_count": 1154,
+  "embedding_model": "bge-m3",
+  "embedding_dimension": 1024,
+  "rebuild": true
+}
+```
+
+如果更换了 embedding 模型或向量维度，建议重新执行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\import_legal_docs.py --path legalDocx --rebuild
+```
+
+原因是查询时会按 `embedding_dimension` 过滤，导入向量和查询向量维度必须一致。
+
+### 8. 验证知识库和模型配置
+
+启动服务：
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+检查 LLM 配置：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/llm/config" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/llm/health" -Method Get
+```
+
+检查 embedding 配置：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/embedding/config" -Method Get
+```
+
+检查知识库导入状态：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/status" -Method Get
+```
+
+检查完整检索配置：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/retrieval/config" -Method Get
+```
+
+查看已入库切片：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/chunks?limit=10" -Method Get
+```
+
+如果返回中看到：
+
+- `legal_kb.configured=true`
+- `chunk_count > 0`
+- `embedding.configured=true`
+- `embedding.last_embedding_source=remote`
+
+说明真实知识库和 embedding 服务已经接通。
+
+### 9. 验证工单智能处理链路
+
+处理单条工单：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/process" -Method Post
+```
+
+查看每个 LangGraph 节点的中间结果：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/process/steps" -Method Post
+```
+
+执行智能流转策略：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/smart-transfer" -Method Post
+```
+
+处理过程中，系统会把工单标题、内容、类型、诉求、地址等组合为检索 query：
+
+```text
+工单内容
+  -> embedding 模型生成 query 向量
+  -> PostgreSQL pgvector 按 cosine distance 召回 LEGAL_VECTOR_TOP_K 条法规切片
+  -> reranker 对候选条文重排
+  -> 按 LEGAL_MIN_RELEVANCE_SCORE 过滤
+  -> 返回 LEGAL_DISPLAY_TOP_K 条法律参考
+```
+
+LLM 会参与以下节点：
+
+- `classify_case_nature`：判断投诉、举报、无法判断。
+- `infer_missing_fields`：推断缺失核心字段。
+- `analyze_emotion`：情绪等级和调解建议。
+- `assess_professional_claimant`：职业索赔/职业打假风险预警。
+- `precheck_acceptance`：受理预检和退单建议。
+- `review_overall_result`：整体复核，受 `LLM_ENABLE_REVIEW` 控制。
+
+### 10. 接入真实工单系统的改造点
+
+当前项目用 `app/mock_data.py` 模拟工单。真实接入时通常改这几处：
+
+- `GET /tickets`：替换为查询真实待处理工单列表。
+- `GET /tickets/{ticket_no}`：替换为查询真实工单详情。
+- `app.models.Ticket`：按真实工单字段补齐映射，至少保留标题、内容、地址、提交人、联系方式、类型、时间等核心字段。
+- `app.actions.py`：把模拟流转、退单、写回动作替换为真实工单系统接口。
+- `app.supplement.py`：把补充任务写入真实补充工单表或外呼任务表。
+
+建议保留当前 LangGraph 节点边界：先结构化和检索，再做风险、受理、补全、属地推荐和动作决策。这样替换数据源和动作接口时，不需要重写智能处理链路。
+
 ## 项目结构
 
 ```text
@@ -165,7 +489,9 @@ AUTO_TRANSFER_CONFIDENCE_THRESHOLD=0.85
 
 ## 法律知识库检索
 
-当前版本已经回退关键词召回，法律检索方式是：
+配置 `LEGAL_DATABASE_URL` 后，系统优先使用 PostgreSQL + pgvector 真实知识库。未配置真实知识库时，才会回退到项目内置的 Demo 法律条文。
+
+真实知识库检索方式是：
 
 ```text
 工单内容
@@ -178,44 +504,30 @@ AUTO_TRANSFER_CONFIDENCE_THRESHOLD=0.85
 ```
 
 
-## 配置说明
+## 配置项速查
 
-复制配置模板：
+完整配置流程见上文“真实能力接入总览”。常用配置文件位于项目根目录：
 
-```powershell
-Copy-Item .env.example .env
+```text
+.env.example  配置模板，可提交
+.env          本地真实配置，不要提交
 ```
 
-常用配置：
+核心配置项：
 
-```env
-LLM_BASE_URL=
-LLM_API_KEY=replace-with-your-api-key
-LLM_MODEL=kimi-k2.6
-LLM_TIMEOUT_SECONDS=60
-LLM_CLASSIFY_TIMEOUT_SECONDS=45
-LLM_FIELD_INFER_TIMEOUT_SECONDS=45
-LLM_REVIEW_TIMEOUT_SECONDS=120
-LLM_CONFIDENCE_THRESHOLD=0.75
-LLM_ENABLE_REVIEW=false
-
-EMBEDDING_BASE_URL=
-EMBEDDING_API_KEY=
-EMBEDDING_MODEL=bge-m3
-EMBEDDING_TIMEOUT_SECONDS=30
-
-RERANKER_BASE_URL=
-RERANKER_API_KEY=
-RERANKER_MODEL=bge-reranker-v2-m3
-RERANKER_TIMEOUT_SECONDS=30
-
-LEGAL_KB_BACKEND=auto
-LEGAL_DATABASE_URL=
-LEGAL_VECTOR_TOP_K=10
-LEGAL_DISPLAY_TOP_K=3
-LEGAL_MIN_RELEVANCE_SCORE=0.55
-LEGAL_ENABLE_RERANKER=true
-LEGAL_PREWARM_ON_STARTUP=true
+```text
+LLM_BASE_URL                  OpenAI-compatible LLM 服务地址
+LLM_API_KEY                   LLM 访问密钥
+LLM_MODEL                     LLM 模型名称
+EMBEDDING_BASE_URL            OpenAI-compatible embedding 服务地址
+EMBEDDING_MODEL               embedding 模型名称，默认 bge-m3
+RERANKER_BASE_URL             reranker 服务地址
+RERANKER_MODEL                reranker 模型名称，默认 bge-reranker-v2-m3
+LEGAL_DATABASE_URL            PostgreSQL + pgvector 连接串
+LEGAL_VECTOR_TOP_K            向量召回候选条数
+LEGAL_DISPLAY_TOP_K           最终展示法律条文数量
+LEGAL_MIN_RELEVANCE_SCORE     法律条文相关性过滤阈值
+LEGAL_ENABLE_RERANKER         是否启用 reranker
 ```
 
 
@@ -247,7 +559,7 @@ main.py
 默认端口：
 
 ```text
-http://127.0.0.1:8020
+http://127.0.0.1:8000
 ```
 
 
@@ -273,7 +585,7 @@ http://127.0.0.1:8020
 接口文档：
 
 ```text
-http://127.0.0.1:8020/docs
+http://127.0.0.1:8000/docs
 ```
 
 主要接口：
@@ -293,6 +605,7 @@ GET  /llm/health
 GET  /embedding/config
 GET  /retrieval/config
 GET  /legal-kb/status
+GET  /legal-kb/preview
 GET  /legal-kb/chunks
 POST /legal-kb/import
 POST /process-all
@@ -301,74 +614,43 @@ POST /process-all
 示例：
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8020/tickets" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets" -Method Get
 ```
 
 处理单条工单：
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8020/tickets/DEMO-TICKET-013/process" -Method Post
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-013/process" -Method Post
 ```
 
 查看处理过程：
 
 ```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8020/tickets/DEMO-TICKET-013/process/steps" -Method Post
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-013/process/steps" -Method Post
 ```
 
-## 法律知识库导入
+## 知识库命令速查
 
-法规文件放在：
+完整 PostgreSQL + pgvector 安装、`.env` 配置、法规导入和检索验证流程见上文“真实能力接入总览”。
 
-```text
-legalDocx/
+预览法规文件切片，不写入数据库：
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/preview?path=legalDocx&limit=20" -Method Get
 ```
 
-支持：
-
-- `.docx`
-- `.doc`
-- `.pdf`
-
-当前 PDF 不做 OCR，适用于可复制文本型 PDF。
-
-导入前需要配置：
-
-```env
-LEGAL_DATABASE_URL=<PostgreSQL 连接串>
-EMBEDDING_BASE_URL=<模型服务地址>/v1
-EMBEDDING_MODEL=bge-m3
-```
-
-导入命令：
+导入法规文件到 PostgreSQL + pgvector：
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\import_legal_docs.py --path legalDocx --rebuild
 ```
 
-说明：
+查看知识库状态和切片：
 
-- `--rebuild` 会先清空已有法律文档和切片，再重新导入。
-- 导入时会解析法规文件、切分条文、调用 embedding 服务生成向量，并写入 PostgreSQL + pgvector。
-- 后续检索时不会重复向量化所有法律条文，只会对当前工单内容生成 query 向量。
-- 普通法律、条例、办法类文件优先按“第几条”切分；决定类文件和 `国令第777号` 优先按“一、二、三、”切分；仍无法识别结构时按段落兜底切分。
-
-查看知识库状态：
-
-```text
-GET /legal-kb/status
-```
-
-查看切片：
-
-```text
-GET /legal-kb/chunks
-```
-
-按来源文件搜索切片：
-
-```text
-GET /legal-kb/chunks?source_file=食品安全
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/status" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/chunks?limit=10" -Method Get
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/chunks?source_file=食品安全" -Method Get
 ```
 
 ## 测试
