@@ -1,4 +1,4 @@
-﻿# 投诉举报工单智能处理 Demo
+﻿# 投诉举报工单智能处理
 
 本项目是一个面向管理部门投诉、举报工单的智能处理 Demo。系统通过 FastAPI 提供接口，通过 LangGraph 编排工单处理流程，并结合本地或自有模型服务、embedding 模型、reranker 模型、PostgreSQL + pgvector 法律知识库，实现工单结构化、投诉举报识别、核心字段校验、退单建议、属地承办单位建议、情绪分析、职业索赔风险识别、法律条款检索和智能流转模拟。
 
@@ -55,9 +55,7 @@
   <img src="images/补充信息任务表.png" alt="补充信息任务表" width="100%">
 </p>
 
-## 未展示内容
-
-以下能力属于后续真实接入方向，当前公开 Demo 未包含真实账号、密钥、接口调用或外部服务依赖：
+## 关键接口
 
 1. 智能联络中心-自动补充工单信息：智能联络中心是阿里云整合语音通信能力、语言大模型能力为企业打造的高效联络中心系统，助力企业通过语音通话快捷高效地联络用户。系统可定时扫描补充工单数据库，识别需要补充核心字段的工单，通过自动外呼向提交人询问工单详情，再将采集到的补充内容作为结构化结果写回工单系统，实现补充工单的信息补全。公开仓库不包含真实外呼号码、录音、话术配置、阿里云访问密钥或业务系统写回接口。<https://help.aliyun.com/zh/aiccs/product-overview/what-is-artificial-intelligence-cloud-call-service?spm=a2c4g.11186623.help-menu-126730.d_0_0_0.75e9166aytmX8K>
 2. 腾讯地图智能地址解析：可根据工单中提交的地址调用腾讯位置服务智能地址解析 API，获取标准化省、市、区县以及乡镇/街道信息，再结合属地路由规则判断工单应流转到对应的市场监管承办单位。公开 Demo 目前仅使用泛化规则模拟该过程，不包含腾讯地图 Key 或真实调用结果。<https://lbs.qq.com/service/webService/webServiceGuide/address/SmartGeocoder>
@@ -347,37 +345,6 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/legal-kb/chunks?limit=10" -Method 
 
 说明真实知识库和 embedding 服务已经接通。
 
-### 9. 验证工单智能处理链路
-
-处理单条工单：
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/process" -Method Post
-```
-
-查看每个 LangGraph 节点的中间结果：
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/process/steps" -Method Post
-```
-
-执行智能流转策略：
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/tickets/DEMO-TICKET-001/smart-transfer" -Method Post
-```
-
-处理过程中，系统会把工单标题、内容、类型、诉求、地址等组合为检索 query：
-
-```text
-工单内容
-  -> embedding 模型生成 query 向量
-  -> PostgreSQL pgvector 按 cosine distance 召回 LEGAL_VECTOR_TOP_K 条法规切片
-  -> reranker 对候选条文重排
-  -> 按 LEGAL_MIN_RELEVANCE_SCORE 过滤
-  -> 返回 LEGAL_DISPLAY_TOP_K 条法律参考
-```
-
 LLM 会参与以下节点：
 
 - `classify_case_nature`：判断投诉、举报、无法判断。
@@ -386,18 +353,6 @@ LLM 会参与以下节点：
 - `assess_professional_claimant`：职业索赔/职业打假风险预警。
 - `precheck_acceptance`：受理预检和退单建议。
 - `review_overall_result`：整体复核，受 `LLM_ENABLE_REVIEW` 控制。
-
-### 10. 接入真实工单系统的改造点
-
-当前项目用 `app/mock_data.py` 模拟工单。真实接入时通常改这几处：
-
-- `GET /tickets`：替换为查询真实待处理工单列表。
-- `GET /tickets/{ticket_no}`：替换为查询真实工单详情。
-- `app.models.Ticket`：按真实工单字段补齐映射，至少保留标题、内容、地址、提交人、联系方式、类型、时间等核心字段。
-- `app.actions.py`：把模拟流转、退单、写回动作替换为真实工单系统接口。
-- `app.supplement.py`：把补充任务写入真实补充工单表或外呼任务表。
-
-建议保留当前 LangGraph 节点边界：先结构化和检索，再做风险、受理、补全、属地推荐和动作决策。这样替换数据源和动作接口时，不需要重写智能处理链路。
 
 ## 项目结构
 
@@ -582,7 +537,7 @@ http://127.0.0.1:8000
 
 ## 常用接口
 
-接口文档：
+接口文档：（启动成功后访问-前端展示页面）
 
 ```text
 http://127.0.0.1:8000/docs
